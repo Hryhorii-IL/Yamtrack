@@ -1,6 +1,7 @@
 __pycache__
 *.pyc
 .env
+docker-compose.override.yml
 .coverage*
 .venv
 src/staticfiles
@@ -17,3 +18,6 @@ requests.http
 TODO.txt
 .codex
 .cache
+
+# Local Postgres data from deploy/
+/db/

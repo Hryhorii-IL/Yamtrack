@@ -1,25 +1,41 @@
 services:
-  yamtrack:
-    container_name: yamtrack
-    image: ghcr.io/fuzzygrim/yamtrack
+  db:
+    image: postgres:16-alpine
+    container_name: yamtrack-dev-db
     restart: unless-stopped
-    depends_on:
-      - redis
     environment:
-      - TZ=Europe/Berlin
-      - SECRET=longstring
-      - REDIS_URL=redis://redis:6379
+      - POSTGRES_DB=${DB_NAME:-yamtrack}
+      - POSTGRES_USER=${DB_USER:-yamtrack}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-yamtrack}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
-      - ./db:/yamtrack/db
+      - pgdata_dev:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8-alpine
+    container_name: yamtrack-dev-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  # Optional: run the whole app in a container built from source.
+  #   docker compose --profile app up --build
+  yamtrack:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379
     ports:
       - "8000:8000"
 
-  redis:
-    container_name: yamtrack-redis
-    image: redis:8-alpine
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-
 volumes:
-  redis_data:
+  pgdata_dev:

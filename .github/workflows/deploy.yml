@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["Docker Image"]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_DIR: /opt/yamtrack
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+    steps:
+      - name: Check required secrets
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ENV_SECRET: ${{ secrets.ENV_SECRET }}
+          ENV_DB_PASSWORD: ${{ secrets.ENV_DB_PASSWORD }}
+          ENV_URLS: ${{ secrets.ENV_URLS }}
+          ENV_SITE_ADDRESS: ${{ secrets.ENV_SITE_ADDRESS }}
+        run: |
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY ENV_SECRET ENV_DB_PASSWORD ENV_URLS ENV_SITE_ADDRESS; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy compose and Caddyfile
+        run: |
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p $DEPLOY_DIR"
+          scp deploy/docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/docker-compose.yml"
+          scp deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/"
+
+      # Every secret/variable named ENV_<NAME> becomes <NAME>=value in .env.
+      # Secrets override variables with the same name.
+      - name: Write .env from ENV_* secrets and variables
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          jq -rn --argjson s "$SECRETS_JSON" --argjson v "$VARS_JSON" '
+            ($v + $s) | to_entries[]
+            | select(.key | startswith("ENV_"))
+            | if (.value | test("\n")) then error("\(.key) contains a newline") else . end
+            | "\(.key | sub("^ENV_"; ""))=\(.value)"
+          ' | ssh "$DEPLOY_USER@$DEPLOY_HOST" "umask 077 && cat > $DEPLOY_DIR/.env"
+
+      - name: Pull image and restart
+        env:
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -e
+            cd $DEPLOY_DIR
+            docker compose pull yamtrack
+            docker compose up -d --remove-orphans
+            docker image prune -f
+            docker logout ghcr.io
+          "

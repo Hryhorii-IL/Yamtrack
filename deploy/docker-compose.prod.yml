@@ -1,0 +1,64 @@
+services:
+  yamtrack:
+    container_name: yamtrack
+    image: ghcr.io/hryhorii-il/yamtrack:latest
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-UTC}
+      - SECRET=${SECRET:?SECRET is required}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - URLS=${URLS:?URLS is required}
+      - REGISTRATION=${REGISTRATION:-False}
+      - REDIS_URL=redis://redis:6379
+      - DB_HOST=db
+      - DB_NAME=yamtrack
+      - DB_USER=yamtrack
+      - DB_PORT=5432
+    expose:
+      - "8000"
+
+  db:
+    image: postgres:16-alpine
+    container_name: yamtrack-db
+    environment:
+      - POSTGRES_DB=yamtrack
+      - POSTGRES_USER=yamtrack
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    container_name: yamtrack-redis
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    depends_on:
+      - yamtrack
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:?SITE_ADDRESS is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:
