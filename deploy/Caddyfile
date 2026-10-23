@@ -1,0 +1,4 @@
+{$SITE_ADDRESS} {
+    reverse_proxy yamtrack:8000
+    encode gzip
+}
