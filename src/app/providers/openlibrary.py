@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from asyncio import sleep as async_sleep
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -319,7 +320,7 @@ async def fetch_author_data(session, url):
         if attempt == AUTHOR_FETCH_ATTEMPTS:
             break
 
-        await asyncio.sleep(attempt)
+        await async_sleep(attempt)
 
     logger.warning("Failed to fetch Open Library author %s: %s", url, status)
     return None
