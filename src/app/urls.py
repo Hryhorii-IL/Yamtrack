@@ -86,6 +86,17 @@ urlpatterns = [
         name="search_parent_season",
     ),
     path("statistics", views.statistics, name="statistics"),
+    path("ai-recommendations", views.ai_recommendations, name="ai_recommendations"),
+    path(
+        "ai/recommendations/<media_type:media_type>",
+        views.ai_recommendations_section,
+        name="ai_recommendations_section",
+    ),
+    path(
+        "ai/recommendations/<source:source>/<media_type:media_type>/<str:media_id>",
+        views.media_ai_recommendations,
+        name="media_ai_recommendations",
+    ),
     path("journal", views.journal, name="journal"),
     path("serviceworker.js", views.service_worker, name="service_worker"),
 ]

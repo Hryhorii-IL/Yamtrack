@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from app import ai_recommendations as ai_recs
 from app import config, helpers, history_processor
 from app import home as home_helpers
 from app import statistics as stats
@@ -342,6 +343,11 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
     else:
         watch_providers = None
 
+    show_ai_tab = (
+        request.user.ai_media_recommendations_available
+        and media_type in ai_recs.MEDIA_TYPES
+    )
+
     context = {
         "media": media_metadata,
         "media_type": media_type,
@@ -349,6 +355,12 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
         "current_instance": current_instance,
         "watch_providers": watch_providers,
         "watch_provider_region": request.user.watch_provider_region,
+        "show_ai_tab": show_ai_tab,
+        "ai_recommendations_url": (
+            reverse("media_ai_recommendations", args=[source, media_type, media_id])
+            if show_ai_tab
+            else None
+        ),
     }
     return render(request, "app/media_details.html", context)
 
@@ -948,6 +960,110 @@ def delete_history_record(request, media_type, history_id):
             str(request.user),
         )
         return HttpResponse("Record not found", status=404)
+
+
+@require_GET
+def ai_recommendations(request):
+    """Return the AI recommendations page."""
+    if not request.user.ai_recommendations_available:
+        raise Http404
+
+    media_types = ai_recs.get_media_types(request.user)
+    media_type = request.GET.get("type")
+    if media_type not in media_types:
+        media_type = media_types[0] if media_types else None
+
+    context = {
+        "media_types": media_types,
+        "media_type": media_type,
+    }
+    return render(request, "app/ai_recommendations.html", context)
+
+
+@require_http_methods(["GET", "POST"])
+def ai_recommendations_section(request, media_type):
+    """Return the AI recommendations of a media type, regenerating on POST."""
+    if not request.user.ai_recommendations_available or (
+        not ai_recs.is_media_type_available(request.user, media_type)
+    ):
+        raise Http404
+
+    if not _is_ai_fragment_request(request):
+        return redirect(f"{reverse('ai_recommendations')}?type={media_type}")
+
+    return _render_ai_recommendations(
+        request,
+        lambda force: ai_recs.global_recommendations(
+            request.user, media_type, force=force
+        ),
+        ai_recs.GLOBAL_COUNT,
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def media_ai_recommendations(request, source, media_type, media_id):
+    """Return the AI recommendations similar to a media, regenerating on POST."""
+    if (
+        not request.user.ai_media_recommendations_available
+        or media_type not in ai_recs.MEDIA_TYPES
+    ):
+        raise Http404
+
+    if not _is_ai_fragment_request(request):
+        try:
+            metadata = services.get_media_metadata(media_type, media_id, source)
+        except services.ProviderAPIError as error:
+            raise Http404 from error
+        return redirect(
+            app_tags.media_url(
+                {
+                    "media_type": media_type,
+                    "source": source,
+                    "media_id": media_id,
+                    "title": metadata["title"],
+                },
+            ),
+        )
+
+    return _render_ai_recommendations(
+        request,
+        lambda force: ai_recs.media_recommendations(
+            request.user, media_type, source, media_id, force=force
+        ),
+        ai_recs.MEDIA_COUNT,
+    )
+
+
+def _is_ai_fragment_request(request):
+    """Return whether HTMX is loading the section itself.
+
+    Track and list modals navigate back to the current path after saving with
+    a soft navigation that swaps the whole body, so those requests (and plain
+    browser requests) are redirected to the full page instead.
+    """
+    return bool(request.headers.get("HX-Request")) and not request.headers.get(
+        "X-Soft-Navigation"
+    )
+
+
+def _render_ai_recommendations(request, get_recommendations, limit):
+    """Render the AI recommendations section partial."""
+    context = {}
+    try:
+        data = get_recommendations(force=request.method == "POST")
+    except ai_recs.RecommendationsInProgressError:
+        context["in_progress"] = True
+    except services.ProviderAPIError as error:
+        context["error"] = str(error)
+    else:
+        context["generated_at"] = data["generated_at"]
+        context["results"] = ai_recs.enrich(request, data["items"], limit)
+
+    return render(
+        request,
+        "app/components/ai_recommendations_section.html",
+        context,
+    )
 
 
 @require_GET

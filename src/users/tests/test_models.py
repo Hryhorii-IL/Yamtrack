@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
@@ -12,6 +13,7 @@ from users.models import (
     MediaTypes,
     QuickWatchDateChoices,
     WeekStartDayChoices,
+    validate_ai_prompts,
 )
 
 
@@ -448,3 +450,37 @@ class UserWeekStartDayTests(TestCase):
         self.assertEqual(result, WeekStartDayChoices.SUNDAY)
         user.refresh_from_db()
         self.assertEqual(user.week_start_day, WeekStartDayChoices.SUNDAY)
+
+
+class ValidateAIPromptsTests(TestCase):
+    """Test validation of the AI prompts JSON field."""
+
+    def test_valid_prompts(self):
+        """Accept known media types with positive and negative text."""
+        validate_ai_prompts({})
+        validate_ai_prompts(
+            {"movie": {"positive": "European films", "negative": "x" * 500}},
+        )
+
+    def test_invalid_prompts(self):
+        """Reject malformed prompts."""
+        invalid_values = [
+            [],
+            {"season": {"positive": "x"}},
+            {"unknown": {"positive": "x"}},
+            {"movie": "European films"},
+            {"movie": {"neutral": "x"}},
+            {"movie": {"positive": 1}},
+            {"movie": {"negative": "x" * 501}},
+        ]
+        for value in invalid_values:
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                validate_ai_prompts(value)
+
+    def test_full_clean_runs_validator(self):
+        """Validate the field when cleaning the model."""
+        user = get_user_model().objects.create_user(username="prompts")
+        user.ai_prompts = {"movie": {"positive": 1}}
+
+        with self.assertRaises(ValidationError):
+            user.full_clean()

@@ -417,3 +417,26 @@ class AppTagsTests(TestCase):
         for seconds, expected in cases:
             with self.subTest(seconds=seconds):
                 self.assertEqual(app_tags.seconds_to_duration(seconds), expected)
+
+
+class MediaSectionCountTests(TestCase):
+    """Test counting the sections of the media details page."""
+
+    def test_ai_tab_alone_shows_tab_bar(self):
+        """Count enough sections to show the tab bar for the AI tab alone."""
+        media = {"media_type": MediaTypes.BOOK.value}
+
+        self.assertEqual(app_tags.media_section_count(media, []), 0)
+        self.assertEqual(
+            app_tags.media_section_count(media, [], show_ai_tab=True),
+            2,
+        )
+
+    def test_ai_tab_with_other_sections(self):
+        """Count the AI tab as one more section."""
+        media = {"media_type": MediaTypes.BOOK.value, "cast": [{}]}
+
+        self.assertEqual(
+            app_tags.media_section_count(media, [], show_ai_tab=True),
+            2,
+        )

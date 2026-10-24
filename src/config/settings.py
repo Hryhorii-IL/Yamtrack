@@ -425,6 +425,18 @@ STEAM_API_KEY = config(
     ),  # Generate default key https://steamcommunity.com/dev/apikey
 )
 
+GEMINI_API_KEY = config(
+    "GEMINI_API_KEY",
+    default=secret(
+        "GEMINI_API_KEY_FILE",
+        "",
+    ),  # Generate key https://aistudio.google.com/apikey
+)
+# Comma-separated, tried in order until one succeeds
+GEMINI_MODELS = config("GEMINI_MODEL", default="gemini-flash-latest", cast=Csv())
+# Seconds to wait for a model before falling back to the next one
+GEMINI_TIMEOUT = config("GEMINI_TIMEOUT", default=30, cast=int)
+
 HARDCOVER_API = config(
     "HARDCOVER_API",
     default=secret(
@@ -568,6 +580,11 @@ DAILY_DIGEST_HOUR = config(
     default=8,
     cast=int,
 )
+AI_RECOMMENDATIONS_HOUR = config(
+    "AI_RECOMMENDATIONS_HOUR",
+    default=4,
+    cast=int,
+)
 USER_MESSAGE_RETENTION_DAYS = config(
     "USER_MESSAGE_RETENTION_DAYS",
     default=30,
@@ -589,6 +606,10 @@ CELERY_BEAT_SCHEDULE = {
     "cleanup_user_messages": {
         "task": "Cleanup user messages",
         "schedule": 60 * 60 * 24,  # every 24 hours
+    },
+    "refresh_ai_recommendations": {
+        "task": "Refresh AI recommendations",
+        "schedule": crontab(hour=AI_RECOMMENDATIONS_HOUR, minute=0),
     },
 }
 

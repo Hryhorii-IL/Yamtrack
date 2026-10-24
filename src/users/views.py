@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import update_session_auth_hash
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,15 +13,20 @@ from django.template.defaultfilters import pluralize
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django_celery_beat.models import PeriodicTask
 
+from app import ai_recommendations
 from app.models import Item, MediaTypes
 from app.providers import tmdb
 from users.forms import NotificationSettingsForm, PasswordChangeForm, UserUpdateForm
 from users.models import (
+    AI_PROMPT_KINDS,
+    AI_PROMPT_MAX_LENGTH,
+    VALID_SEARCH_TYPES,
     WATCH_PROVIDER_REGION_UNSET,
     DateFormatChoices,
     QuickWatchDateChoices,
     TimeFormatChoices,
     WeekStartDayChoices,
+    validate_ai_prompts,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +221,94 @@ def test_notification(request):
     return redirect("notifications")
 
 
+AI_PROMPT_FIELDS = [
+    "ai_include_liked",
+    "ai_liked_min_score",
+    "ai_include_disliked",
+    "ai_disliked_max_score",
+]
+
+
+def parse_ai_recommendation_preferences(user, data):
+    """Return the submitted AI recommendation preferences by field name."""
+    return {
+        "ai_recommendations_enabled": "ai_recommendations_enabled" in data,
+        "ai_media_recommendations_enabled": "ai_media_recommendations_enabled" in data,
+        "ai_include_liked": "ai_include_liked" in data,
+        "ai_include_disliked": "ai_include_disliked" in data,
+        "ai_liked_min_score": parse_score(
+            data.get("ai_liked_min_score"),
+            user.ai_liked_min_score,
+        ),
+        "ai_disliked_max_score": parse_score(
+            data.get("ai_disliked_max_score"),
+            user.ai_disliked_max_score,
+        ),
+        "ai_prompts": parse_ai_prompts(data),
+    }
+
+
+def validate_ai_recommendation_preferences(preferences):
+    """Return an error message if the AI recommendation preferences are invalid."""
+    if preferences["ai_liked_min_score"] <= preferences["ai_disliked_max_score"]:
+        return "The minimum liked score must be higher than the maximum disliked score."
+    try:
+        validate_ai_prompts(preferences["ai_prompts"])
+    except ValidationError as error:
+        return " ".join(error.messages)
+    return None
+
+
+def get_ai_prompt_state(user, media_types):
+    """Return the settings AI recommendations are generated from."""
+    fields = [
+        *AI_PROMPT_FIELDS,
+        *(f"{media_type}_enabled" for media_type in media_types),
+    ]
+    return [getattr(user, field) for field in fields], user.ai_prompts
+
+
+def invalidate_ai_recommendations(user, previous_state, media_types):
+    """Delete cached AI recommendations built from outdated settings."""
+    previous_fields, previous_prompts = previous_state
+    current_fields, current_prompts = get_ai_prompt_state(user, media_types)
+    if current_fields != previous_fields:
+        ai_recommendations.invalidate_user(user)
+        return
+
+    for media_type in VALID_SEARCH_TYPES:
+        if previous_prompts.get(media_type) != current_prompts.get(media_type):
+            ai_recommendations.invalidate_media_type(user, media_type)
+
+
+def parse_ai_prompts(data):
+    """Return the non-empty AI prompts submitted for each media type."""
+    prompts = {}
+    for media_type in VALID_SEARCH_TYPES:
+        media_prompts = {}
+        for kind in AI_PROMPT_KINDS:
+            # Browsers count a line break as one character towards maxlength
+            text = (
+                data.get(f"ai_prompt_{kind}_{media_type}", "")
+                .replace("\r\n", "\n")
+                .strip()
+            )
+            if text:
+                media_prompts[kind] = text
+        if media_prompts:
+            prompts[media_type] = media_prompts
+    return prompts
+
+
+def parse_score(value, default):
+    """Return ``value`` as a score clamped to 0-10, or ``default`` if invalid."""
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(10, score))
+
+
 @require_http_methods(["GET", "POST"])
 def preferences(request):
     """Render the preferences settings page."""
@@ -233,6 +327,16 @@ def preferences(request):
                 "time_format_choices": TimeFormatChoices.choices,
                 "week_start_day_choices": WeekStartDayChoices.choices,
                 "watch_provider_choices": watch_provider_regions,
+                "gemini_configured": bool(settings.GEMINI_API_KEY),
+                "ai_prompt_max_length": AI_PROMPT_MAX_LENGTH,
+                "ai_prompts": [
+                    {
+                        "media_type": media_type,
+                        "positive": request.user.get_ai_prompt(media_type, "positive"),
+                        "negative": request.user.get_ai_prompt(media_type, "negative"),
+                    }
+                    for media_type in VALID_SEARCH_TYPES
+                ],
             },
         )
 
@@ -272,6 +376,8 @@ def preferences(request):
     else:
         request.user.watch_provider_region = WATCH_PROVIDER_REGION_UNSET
 
+    previous_ai_state = get_ai_prompt_state(request.user, media_types)
+
     # Update user preferences for each media type
     for media_type in media_types:
         setattr(
@@ -280,8 +386,20 @@ def preferences(request):
             media_type in media_types_checked,
         )
 
+    # Invalid AI preferences are skipped so the other preferences still save
+    ai_preferences = parse_ai_recommendation_preferences(request.user, request.POST)
+    error = validate_ai_recommendation_preferences(ai_preferences)
+    if error:
+        messages.error(request, f"AI recommendation settings weren't saved. {error}")
+    else:
+        for field, value in ai_preferences.items():
+            setattr(request.user, field, value)
+
     # Save changes and redirect
     request.user.save()
+
+    # Cached recommendations were built from the previous prompt settings
+    invalidate_ai_recommendations(request.user, previous_ai_state, media_types)
     messages.success(request, "Settings updated.")
 
     return redirect("preferences")
