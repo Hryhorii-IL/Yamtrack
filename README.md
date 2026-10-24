@@ -4,6 +4,7 @@
 
 ![App Tests](https://github.com/Hryhorii-IL/Yamtrack/actions/workflows/app-tests.yml/badge.svg)
 ![Docker Image](https://github.com/Hryhorii-IL/Yamtrack/actions/workflows/docker-image.yml/badge.svg)
+![Codecov](https://codecov.io/github/Hryhorii-IL/Yamtrack/branch/dev/graph/badge.svg)
 ![GitHub](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
 Yamtrack is a self hosted media tracker for movies, tv shows, anime, manga, video games, books, comics, and board games.
