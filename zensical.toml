@@ -1,11 +1,11 @@
 [project]
 site_name = "Yamtrack Documentation"
-site_url = "https://FuzzyGrim.github.io/Yamtrack/"
-site_author = "FuzzyGrim"
+site_url = "https://Hryhorii-IL.github.io/Yamtrack/"
+site_author = "Hryhorii-IL"
 site_description = "Yamtrack is a self hosted media tracker for movies, tv shows, anime, manga, video games, books, comics, and board games."
-repo_name = "FuzzyGrim/Yamtrack"
-repo_url = "https://github.com/FuzzyGrim/Yamtrack"
-copyright = "Copyright &copy; 2022 - 2026 FuzzyGrim"
+repo_name = "Hryhorii-IL/Yamtrack"
+repo_url = "https://github.com/Hryhorii-IL/Yamtrack"
+copyright = "Copyright &copy; 2022 - 2026 FuzzyGrim; fork maintained by Hryhorii-IL"
 edit_uri = "edit/dev/docs/"
 extra_css = ["stylesheets/extra.css"]
 
@@ -73,7 +73,7 @@ alias = true
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
-link = "https://github.com/FuzzyGrim/Yamtrack"
+link = "https://github.com/Hryhorii-IL/Yamtrack"
 
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.tables]

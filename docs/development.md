@@ -14,7 +14,7 @@ This page covers working on Yamtrack from source.
 ### Clone the repository
 
 ```bash
-git clone https://github.com/FuzzyGrim/Yamtrack.git
+git clone https://github.com/Hryhorii-IL/Yamtrack.git
 cd Yamtrack
 ```
 

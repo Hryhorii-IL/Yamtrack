@@ -15,7 +15,7 @@ The Docker setup uses the published Yamtrack image, so you do not need to clone 
 For the default SQLite setup:
 
 ```bash
-curl -LO https://raw.githubusercontent.com/FuzzyGrim/Yamtrack/release/docker-compose.yml
+curl -LO https://raw.githubusercontent.com/Hryhorii-IL/Yamtrack/release/docker-compose.yml
 ```
 
 SQLite is enough for most personal installs. It stores the database in the local `db` directory created beside the Compose file.
@@ -23,7 +23,7 @@ SQLite is enough for most personal installs. It stores the database in the local
 If you prefer PostgreSQL, download the PostgreSQL example instead:
 
 ```bash
-curl -LO https://raw.githubusercontent.com/FuzzyGrim/Yamtrack/release/docker-compose.postgres.yml
+curl -LO https://raw.githubusercontent.com/Hryhorii-IL/Yamtrack/release/docker-compose.postgres.yml
 ```
 
 ## 2) Update the environment values
