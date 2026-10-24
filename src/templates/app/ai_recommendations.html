@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% load app_tags %}
+
+{% block title %}
+  AI Recommendations - Yamtrack
+{% endblock title %}
+
+{% block content %}
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold mb-2">AI Recommendations</h1>
+    <p class="text-gray-400">Personalized picks based on your ratings, refreshed daily</p>
+  </div>
+
+  {% if media_type %}
+    <nav class="flex gap-x-6 overflow-x-auto scrollbar-hide border-b border-[#2c3136] mb-6">
+      {% for type in media_types %}
+        <a href="{% url 'ai_recommendations' %}?type={{ type }}"
+           class="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 {% if type == media_type %}text-white border-indigo-500{% else %}text-gray-400 border-transparent hover:text-white{% endif %}">
+          {{ type|media_type_readable_plural }}
+        </a>
+      {% endfor %}
+    </nav>
+
+    {% url 'ai_recommendations_section' media_type as section_url %}
+    {% include "app/components/ai_recommendations_loading.html" with url=section_url %}
+  {% else %}
+    <div class="rounded-lg border border-dashed border-gray-700 bg-[#2a2f35] px-6 py-12 text-center text-sm text-gray-400">
+      Track media of a type enabled in your preferences to get AI recommendations.
+    </div>
+  {% endif %}
+{% endblock content %}

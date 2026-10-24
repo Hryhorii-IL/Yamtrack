@@ -19,3 +19,7 @@ TESTING = True
 
 # Steam API key for testing
 STEAM_API_KEY = "test_steam_api_key"
+
+# Gemini API key for testing
+GEMINI_API_KEY = "test_gemini_api_key"
+GEMINI_MODELS = ["gemini-test"]

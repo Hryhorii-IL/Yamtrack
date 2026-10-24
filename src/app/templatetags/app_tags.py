@@ -488,6 +488,7 @@ def media_section_count(
     user_medias,
     watch_providers=None,
     watch_provider_region=None,
+    show_ai_tab=None,
 ):
     """Return the number of content sections on the media details page."""
     count = 0
@@ -509,6 +510,9 @@ def media_section_count(
         count += 1
     if media.get("time_to_beat"):
         count += 1
+    if show_ai_tab:
+        # The AI section isn't part of the overview, so it needs the tab bar
+        count = max(count + 1, 2)
     return count
 
 

@@ -1,0 +1,37 @@
+{% if in_progress %}
+  {% include "app/components/ai_recommendations_loading.html" with url=request.path trigger="load delay:5s" %}
+{% else %}
+  <div class="ai-recommendations">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <p class="text-sm text-gray-400">{% if generated_at %}Generated {{ generated_at|timesince }} ago{% endif %}</p>
+      <button hx-post="{{ request.path }}"
+              hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+              hx-target="closest .ai-recommendations"
+              hx-swap="outerHTML"
+              hx-disabled-elt="this"
+              type="button"
+              class="flex items-center gap-2 rounded-md border border-gray-700 bg-[#2a2f35] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#313842] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+        <div class="htmx-indicator h-4 w-4 animate-spin rounded-full border-b-2 border-indigo-400"></div>
+        {% include "app/icons/repeat.svg" with classes="w-4 h-4" %}
+        <span>Regenerate</span>
+      </button>
+    </div>
+
+    {% if error %}
+      <div class="rounded-lg border border-red-700 bg-red-900/50 px-4 py-3 text-sm text-red-300">{{ error }}</div>
+    {% elif results %}
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
+        {% for result in results %}
+          <div class="flex flex-col gap-2" title="{{ result.item.reason }}">
+            {% include "app/components/media_card.html" with item=result.item title=result.item.title media=result.media %}
+            <p class="text-xs text-gray-400 line-clamp-3">{{ result.item.reason }}</p>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="rounded-lg border border-dashed border-gray-700 bg-[#2a2f35] px-6 py-12 text-center text-sm text-gray-400">
+        No recommendations found. Try regenerating.
+      </div>
+    {% endif %}
+  </div>
+{% endif %}

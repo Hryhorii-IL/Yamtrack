@@ -466,6 +466,14 @@
           {% endfor %}
         {% endif %}
 
+        {# AI Recommendations, generated only when the tab is opened #}
+        {% if show_ai_tab %}
+          <section class="mb-8" x-cloak x-show="tab === 'ai'">
+            <h2 class="text-xl font-bold mb-4">AI Recommendations</h2>
+            {% include "app/components/ai_recommendations_loading.html" with url=ai_recommendations_url trigger="intersect once" %}
+          </section>
+        {% endif %}
+
         {# Repeats #}
         {% if user_medias|length > 1 %}
           <section class="mb-8" x-show="tab === 'overview' || tab === 'repeats'">

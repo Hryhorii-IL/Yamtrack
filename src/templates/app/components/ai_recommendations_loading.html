@@ -1,0 +1,9 @@
+<div class="ai-recommendations"
+     hx-get="{{ url }}"
+     hx-trigger="{{ trigger|default:'load' }}"
+     hx-swap="outerHTML">
+  <div class="flex flex-col items-center justify-center gap-3 py-16 text-gray-400">
+    <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-400"></div>
+    <span class="text-sm">Generating AI recommendations...</span>
+  </div>
+</div>

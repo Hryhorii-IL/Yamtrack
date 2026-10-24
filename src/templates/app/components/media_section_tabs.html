@@ -1,5 +1,5 @@
 {% load app_tags %}
-{% media_section_count media user_medias watch_providers watch_provider_region as section_count %}
+{% media_section_count media user_medias watch_providers watch_provider_region show_ai_tab as section_count %}
 {% if section_count > 1 %}
   <nav class="flex gap-x-6 overflow-x-auto scrollbar-hide border-b border-[#2c3136] {{ extra_classes }}">
     <button @click="tab = 'overview'"
@@ -30,6 +30,14 @@
           </button>
         {% endif %}
       {% endfor %}
+    {% endif %}
+
+    {% if show_ai_tab %}
+      <button @click="tab = 'ai'"
+              class="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors duration-200 cursor-pointer"
+              :class="tab === 'ai' ? 'text-white border-indigo-500' : 'text-gray-400 border-transparent hover:text-white'">
+        AI Recommendations
+      </button>
     {% endif %}
 
     {% if user_medias|length > 1 %}

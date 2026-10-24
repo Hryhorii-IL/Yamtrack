@@ -144,6 +144,21 @@
                     </a>
                   </li>
 
+                  {% if user.ai_recommendations_available %}
+                    {% url 'ai_recommendations' as ai_recommendations_url %}
+                    <li>
+                      <a href="{{ ai_recommendations_url }}"
+                         class="flex items-center space-x-3 px-4 py-2 rounded-md transition-colors duration-200 text-sm {% if request.path == ai_recommendations_url %}text-white bg-[#2c3136]{% else %}text-gray-400 hover:text-white hover:bg-[#23272b]{% endif %}">
+                        {% if request.path|str_equals:ai_recommendations_url %}
+                          {% include "app/icons/flame.svg" with classes="w-5 h-5 text-indigo-400 " %}
+                        {% else %}
+                          {% include "app/icons/flame.svg" with classes="w-5 h-5" %}
+                        {% endif %}
+                        <span>AI Recommendations</span>
+                      </a>
+                    </li>
+                  {% endif %}
+
                   {% url 'journal' as journal_url %}
                   <li>
                     <a href="{{ journal_url }}"

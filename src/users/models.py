@@ -1,6 +1,8 @@
 import secrets
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
 from django_celery_beat.models import PeriodicTask
 from django_celery_results.models import TaskResult
@@ -16,6 +18,32 @@ VALID_SEARCH_TYPES = [
 
 # Sentinel for an unconfigured watch provider region.
 WATCH_PROVIDER_REGION_UNSET = "UNSET"
+
+
+AI_PROMPT_KINDS = ("positive", "negative")
+AI_PROMPT_MAX_LENGTH = 500
+
+
+def validate_ai_prompts(value):
+    """Validate {media_type: {"positive": str, "negative": str}} AI prompts."""
+    if not isinstance(value, dict):
+        msg = "AI prompts must be an object."
+        raise ValidationError(msg)
+
+    for media_type, prompts in value.items():
+        if media_type not in VALID_SEARCH_TYPES:
+            msg = f"Invalid media type for AI prompts: {media_type}."
+            raise ValidationError(msg)
+        if not isinstance(prompts, dict) or not set(prompts) <= set(AI_PROMPT_KINDS):
+            msg = f"AI prompts for {media_type} must only have positive and negative."
+            raise ValidationError(msg)
+        for text in prompts.values():
+            if not isinstance(text, str) or len(text) > AI_PROMPT_MAX_LENGTH:
+                msg = (
+                    f"AI prompts for {media_type} must be text of at most "
+                    f"{AI_PROMPT_MAX_LENGTH} characters."
+                )
+                raise ValidationError(msg)
 
 
 def generate_token():
@@ -361,6 +389,38 @@ class User(AbstractUser):
         help_text="Hide zero ratings from media cards",
     )
 
+    # AI recommendations
+    ai_recommendations_enabled = models.BooleanField(
+        default=False,
+        help_text="Show the AI recommendations page",
+    )
+    ai_media_recommendations_enabled = models.BooleanField(
+        default=False,
+        help_text="Show an AI recommendations tab on media details pages",
+    )
+    ai_include_liked = models.BooleanField(
+        default=True,
+        help_text="Include liked media in AI recommendation prompts",
+    )
+    ai_liked_min_score = models.PositiveSmallIntegerField(
+        default=8,
+        help_text="Minimum score for media to count as liked",
+    )
+    ai_include_disliked = models.BooleanField(
+        default=True,
+        help_text="Include disliked media in AI recommendation prompts",
+    )
+    ai_disliked_max_score = models.PositiveSmallIntegerField(
+        default=4,
+        help_text="Maximum score for media to count as disliked",
+    )
+    ai_prompts = models.JSONField(
+        default=dict,
+        blank=True,
+        validators=[validate_ai_prompts],
+        help_text="Wishes added to AI recommendation prompts per media type",
+    )
+
     # Watch provider region
     watch_provider_region = models.CharField(
         max_length=5,
@@ -553,6 +613,20 @@ class User(AbstractUser):
                 name="week_start_day_valid",
                 condition=models.Q(week_start_day__in=WeekStartDayChoices.values),
             ),
+            models.CheckConstraint(
+                name="ai_liked_min_score_valid",
+                condition=models.Q(ai_liked_min_score__lte=10),
+            ),
+            models.CheckConstraint(
+                name="ai_disliked_max_score_valid",
+                condition=models.Q(ai_disliked_max_score__lte=10),
+            ),
+            models.CheckConstraint(
+                name="ai_liked_above_disliked_score",
+                condition=models.Q(
+                    ai_liked_min_score__gt=models.F("ai_disliked_max_score"),
+                ),
+            ),
         ]
 
     def update_preference(self, field_name, new_value):
@@ -625,6 +699,20 @@ class User(AbstractUser):
 
         # CURRENT_DATE is the default
         return now
+
+    @property
+    def ai_recommendations_available(self):
+        """Return whether the AI recommendations page is usable."""
+        return self.ai_recommendations_enabled and bool(settings.GEMINI_API_KEY)
+
+    @property
+    def ai_media_recommendations_available(self):
+        """Return whether the AI tab on media details pages is usable."""
+        return self.ai_media_recommendations_enabled and bool(settings.GEMINI_API_KEY)
+
+    def get_ai_prompt(self, media_type, kind):
+        """Return the user's AI prompt text of a kind for a media type."""
+        return self.ai_prompts.get(media_type, {}).get(kind, "")
 
     def get_enabled_media_types(self):
         """Return a list of enabled media type values based on user preferences."""
