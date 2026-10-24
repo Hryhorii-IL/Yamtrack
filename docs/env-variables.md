@@ -65,7 +65,7 @@ must instead listen on a port that is free inside that namespace. Set
 ```yaml
 services:
   yamtrack:
-    image: ghcr.io/fuzzygrim/yamtrack
+    image: ghcr.io/hryhorii-il/yamtrack
     environment:
       # ... the rest of the Yamtrack variables
       - YAMTRACK_INTERNAL_PORT=9117
