@@ -1,6 +1,10 @@
 import gc
+import os
 
 bind = "localhost:23847"
+workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
+worker_class = "gthread"
+threads = int(os.environ.get("GUNICORN_THREADS", "4"))
 preload_app = True
 timeout = 200
 max_requests = 500

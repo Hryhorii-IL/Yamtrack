@@ -46,6 +46,7 @@ See [media-imports](media-imports.md).
 | `PGID`                          | Group ID for the app. Default to `1000`.                                                                                                                              |
 | `TZ`                            | Timezone (e.g., `Europe/Berlin`). Default to `UTC`.                                                                                                                   |
 | `WEB_CONCURRENCY`               | Number of web server processes. Default to `1`.                                                                                                                       |
+| `GUNICORN_THREADS`              | Number of threads per web server process. Default to `4`.                                                                                                             |
 | `SOCIAL_PROVIDERS`              | Comma-separated list of social authentication providers to enable (e.g., `allauth.socialaccount.providers.openid_connect,allauth.socialaccount.providers.github`).    |
 | `SOCIALACCOUNT_PROVIDERS`       | JSON configuration for social providers. See the [Docs](social-auth.md) for an OIDC configuration example.                                                            |
 | `ACCOUNT_DEFAULT_HTTP_PROTOCOL` | Protocol for social providers. If your `redirect_uri` in OIDC config is `https`, set this to `https`. Default is determined based on your `CSRF` settings.            |
