@@ -16,10 +16,22 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from app import ai_recommendations as ai_recs
 from app import config, helpers, history_processor, tasks
 from app import home as home_helpers
 from app import statistics as stats
+from app.ai_recommendations.bl.ai_recommendations_actions import (
+    AIRecommendationsActions,
+)
+from app.ai_recommendations.bl.queries.media_types import (
+    get_media_types,
+    is_media_type_available,
+    is_supported_media_type,
+)
+from app.ai_recommendations.bl.queries.pool import get_pool_page
+from app.ai_recommendations.bl.queries.provider import get_provider_info
+from app.ai_recommendations.bl.types.constants import MEDIA_COUNT
+from app.ai_recommendations.bl.types.constants import SECTION_NAME as AI_SECTION_NAME
+from app.ai_recommendations.bl.types.result import ErrorCode
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
 from app.models import (
     TV,
@@ -345,7 +357,7 @@ def media_details(request, source, media_type, media_id, title):  # noqa: ARG001
 
     show_ai_tab = (
         request.user.ai_media_recommendations_available
-        and media_type in ai_recs.MEDIA_TYPES
+        and is_supported_media_type(media_type)
     )
 
     context = {
@@ -968,7 +980,7 @@ def ai_recommendations(request):
     if not request.user.ai_recommendations_available:
         raise Http404
 
-    media_types = ai_recs.get_media_types(request.user)
+    media_types = list(get_media_types(request.user.id))
     media_type = request.GET.get("type")
     if media_type not in media_types:
         media_type = media_types[0] if media_types else None
@@ -984,7 +996,7 @@ def ai_recommendations(request):
 def ai_recommendations_section(request, media_type):
     """Return the AI recommendations of a media type, regenerating on POST."""
     if not request.user.ai_recommendations_available or (
-        not ai_recs.is_media_type_available(request.user, media_type)
+        not is_media_type_available(request.user.id, media_type)
     ):
         raise Http404
 
@@ -994,21 +1006,32 @@ def ai_recommendations_section(request, media_type):
     if request.method == "GET" and "offset" in request.GET:
         return _render_ai_pool_more(request, media_type)
 
-    return _render_ai_recommendations(
+    pool = AIRecommendationsActions.pool(
+        request.user.id,
+        media_type,
+        force=request.method == "POST",
+        queue_generation=tasks.queue_ai_generation,
+        queue_extension=tasks.queue_ai_extension,
+    ).value
+    page = (
+        None
+        if pool is None
+        else _ai_pool_page(request, media_type, offset=0, shown=0, version=pool.version)
+    )
+    if pool is None or page is None:
+        return _render_ai_section(request, {"in_progress": True})
+    return _render_ai_section(
         request,
-        lambda force: ai_recs.global_recommendations(
-            request.user, media_type, tasks.queue_ai_generation, force=force
-        ),
-        pool_media_type=media_type,
+        {"generated_at": pool.generated_at, **_ai_page_context(page)},
     )
 
 
 @require_http_methods(["GET", "POST"])
 def media_ai_recommendations(request, source, media_type, media_id):
     """Return the AI recommendations similar to a media, regenerating on POST."""
-    if (
-        not request.user.ai_media_recommendations_available
-        or media_type not in ai_recs.MEDIA_TYPES
+    if not (
+        request.user.ai_media_recommendations_available
+        and is_supported_media_type(media_type)
     ):
         raise Http404
 
@@ -1028,12 +1051,43 @@ def media_ai_recommendations(request, source, media_type, media_id):
             ),
         )
 
-    return _render_ai_recommendations(
-        request,
-        lambda force: ai_recs.media_recommendations(
-            request.user, media_type, source, media_id, force=force
-        ),
+    result = AIRecommendationsActions.media_recommendations(
+        request.user.id,
+        media_type,
+        source,
+        str(media_id),
+        force=request.method == "POST",
     )
+    recommendations = result.value
+    if recommendations is None:
+        # Another request is generating them, poll until it's done
+        if result.error_code is ErrorCode.CONFLICT:
+            return _render_ai_section(request, {"in_progress": True})
+        return _render_ai_section(
+            request,
+            {"error": _ai_error_message(result.error_code)},
+        )
+    return _render_ai_section(
+        request,
+        {
+            "generated_at": recommendations.generated_at,
+            "results": _visible_ai_cards(request, recommendations.items)[:MEDIA_COUNT],
+        },
+    )
+
+
+def _ai_error_message(error_code):
+    """Return the message shown for a failed AI recommendations use case."""
+    provider = get_provider_info().label
+    messages = {
+        ErrorCode.NOT_FOUND: "The media could not be loaded from its provider.",
+        ErrorCode.UNAVAILABLE: (f"The {provider} API is unavailable, try again later."),
+        ErrorCode.INVALID: (
+            f"{provider} could not generate recommendations. "
+            "Check the logs for more details."
+        ),
+    }
+    return messages.get(error_code, messages[ErrorCode.INVALID])
 
 
 def _is_ai_fragment_request(request):
@@ -1048,96 +1102,70 @@ def _is_ai_fragment_request(request):
     )
 
 
-def _render_ai_recommendations(request, get_recommendations, *, pool_media_type=None):
-    """Render the AI recommendations section partial.
-
-    With ``pool_media_type`` the whole pool is shown and extended in the
-    background while it's below its target size.
-    """
-    context = {}
-    try:
-        data = get_recommendations(force=request.method == "POST")
-    except ai_recs.RecommendationsInProgressError:
-        context["in_progress"] = True
-    except services.ProviderAPIError as error:
-        context["error"] = str(error)
-    else:
-        context["generated_at"] = data["generated_at"]
-        if pool_media_type is None:
-            context["results"] = ai_recs.enrich(
-                request,
-                data["items"],
-                ai_recs.MEDIA_COUNT,
-            )
-        else:
-            tasks.queue_ai_extension_if_needed(request.user.id, pool_media_type, data)
-            context.update(
-                _ai_pool_context(request, data, pool_media_type, offset=0),
-            )
-
-    return render(
-        request,
-        "app/components/ai_recommendations_section.html",
-        context,
-    )
+def _render_ai_section(request, context):
+    """Render the AI recommendations section partial."""
+    return render(request, "app/components/ai_recommendations_section.html", context)
 
 
 def _render_ai_pool_more(request, media_type):
-    """Render the pool items added after ``offset`` while the pool grows."""
-    data = cache.get(ai_recs.global_cache_key(request.user.id, media_type))
+    """Render the pool cards added after ``offset`` while the pool grows."""
     try:
         offset = int(request.GET["offset"])
         shown = int(request.GET.get("shown", 0))
     except ValueError:
-        offset = None
-    # Stop polling when the pool was regenerated or invalidated meanwhile
-    if (
-        data is None
-        or offset is None
-        or request.GET.get("generated") != ai_recs.pool_version(data)
-    ):
         return HttpResponse("")
 
-    context = _ai_pool_context(
+    page = _ai_pool_page(
         request,
-        data,
         media_type,
         offset=offset,
         shown=shown,
+        version=request.GET.get("generated", ""),
     )
+    # Stop polling when the pool was regenerated or invalidated meanwhile
+    if page is None:
+        return HttpResponse("")
+
+    context = _ai_page_context(page)
     # The section shows errors at the top, appended chunks show them inline
-    context["inline_error"] = context["error"]
+    context["inline_error"] = page.error
     return render(request, "app/components/ai_recommendations_more.html", context)
 
 
-def _ai_pool_context(request, data, media_type, *, offset, shown=0):
-    """Return the context to render pool items from ``offset`` onwards.
-
-    ``shown`` cards are already on the page, so at most ``POOL_SHOWN`` are shown.
-    """
-    results = ai_recs.enrich(
-        request,
-        data["items"][offset:],
-        max(ai_recs.POOL_SHOWN - shown, 0),
+def _ai_pool_page(request, media_type, *, offset, shown, version):
+    """Return the pool page of the user's visible cards."""
+    return get_pool_page(
+        request.user.id,
+        media_type,
+        offset=offset,
+        shown=shown,
+        version=version,
+        visible=lambda titles: _visible_ai_cards(request, titles),
     )
-    shown += len(results)
+
+
+def _ai_page_context(page):
+    """Return the template context of a pool page."""
     return {
-        "results": results,
-        "error": data.get("error"),
-        "growing": shown < ai_recs.POOL_SHOWN
-        and (
-            data.get("partial")
-            or (
-                ai_recs.needs_extension(data)
-                and ai_recs.is_background_queued(request.user.id, media_type)
-            )
-        ),
+        "results": page.results,
+        "error": page.error,
+        "growing": page.growing,
         # Poll faster while the first batch is shown card by card
-        "poll_delay": "1s" if data.get("partial") else "3s",
-        "offset": len(data["items"]),
-        "shown": shown,
-        "version": ai_recs.pool_version(data),
+        "poll_delay": "1s" if page.partial else "3s",
+        "offset": page.offset,
+        "shown": page.shown,
+        "version": page.version,
     }
+
+
+def _visible_ai_cards(request, titles):
+    """Return the cards of recommended titles the user doesn't track yet."""
+    cards = helpers.enrich_items_with_user_data(
+        request,
+        [title.to_card() for title in titles],
+        AI_SECTION_NAME,
+    )
+    return [card for card in cards if card["media"] is None]
 
 
 @require_GET

@@ -6,8 +6,8 @@ from django.db import models
 from django_celery_beat.models import PeriodicTask
 from django_celery_results.models import TaskResult
 
+from app.ai_recommendations.bl.queries.provider import get_provider_info
 from app.models import Item, MediaTypes, Status
-from app.providers import llm
 from users import helpers
 
 EXCLUDED_SEARCH_TYPES = [MediaTypes.SEASON.value, MediaTypes.EPISODE.value]
@@ -703,12 +703,12 @@ class User(AbstractUser):
     @property
     def ai_recommendations_available(self):
         """Return whether the AI recommendations page is usable."""
-        return self.ai_recommendations_enabled and llm.is_configured()
+        return self.ai_recommendations_enabled and get_provider_info().configured
 
     @property
     def ai_media_recommendations_available(self):
         """Return whether the AI tab on media details pages is usable."""
-        return self.ai_media_recommendations_enabled and llm.is_configured()
+        return self.ai_media_recommendations_enabled and get_provider_info().configured
 
     def get_ai_prompt(self, media_type, kind):
         """Return the user's AI prompt text of a kind for a media type."""

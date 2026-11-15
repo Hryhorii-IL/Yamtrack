@@ -7,7 +7,7 @@ from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from app import ai_recommendations
+from app.ai_recommendations.bl.stores.django_cache_pool_store import pool_key
 from app.models import MediaTypes
 from users.models import DateFormatChoices
 
@@ -34,7 +34,7 @@ class AIRecommendationPreferencesTests(TestCase):
             if media_type != MediaTypes.EPISODE.value
             and getattr(self.user, f"{media_type}_enabled")
         ]
-        self.cache_key = ai_recommendations.global_cache_key(
+        self.cache_key = pool_key(
             self.user.id,
             MediaTypes.MOVIE.value,
         )
@@ -190,7 +190,7 @@ class AIRecommendationPreferencesTests(TestCase):
 
     def test_prompt_change_invalidates_media_type_only(self):
         """Delete only the cache of the media type whose wishes changed."""
-        anime_key = ai_recommendations.global_cache_key(
+        anime_key = pool_key(
             self.user.id,
             MediaTypes.ANIME.value,
         )
