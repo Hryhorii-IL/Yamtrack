@@ -1,0 +1,21 @@
+{% for result in results %}
+  {% include "app/components/media_card.html" with item=result.item title=result.item.title media=result.media %}
+{% endfor %}
+{% if inline_error %}
+  <div class="col-span-full rounded-lg border border-red-700 bg-red-900/50 px-4 py-3 text-sm text-red-300">{{ inline_error }}</div>
+{% endif %}
+{% if growing %}
+  <div class="col-span-full flex items-center justify-center gap-3 py-6 text-gray-400"
+       hx-get="{{ request.path }}?offset={{ offset }}&shown={{ shown }}&generated={{ version }}"
+       hx-trigger="load delay:{{ poll_delay }}"
+       hx-swap="outerHTML">
+    <div class="h-5 w-5 animate-spin rounded-full border-b-2 border-indigo-400"></div>
+    <span class="text-sm">
+      {% if shown %}
+        Loading more recommendations...
+      {% else %}
+        Generating AI recommendations...
+      {% endif %}
+    </span>
+  </div>
+{% endif %}

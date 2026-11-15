@@ -20,6 +20,9 @@ TESTING = True
 # Steam API key for testing
 STEAM_API_KEY = "test_steam_api_key"
 
-# Gemini API key for testing
+# AI provider settings for testing, independent of the local .env
+AI_PROVIDER = "gemini"
 GEMINI_API_KEY = "test_gemini_api_key"
 GEMINI_MODELS = ["gemini-test"]
+ANTHROPIC_API_KEY = "test_anthropic_api_key"
+CLAUDE_MODELS = ["claude-test"]

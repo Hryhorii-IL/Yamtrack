@@ -13,7 +13,10 @@ from django.template.defaultfilters import pluralize
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django_celery_beat.models import PeriodicTask
 
-from app import ai_recommendations
+from app.ai_recommendations.bl.ai_recommendations_actions import (
+    AIRecommendationsActions,
+)
+from app.ai_recommendations.bl.queries.provider import get_provider_info
 from app.models import Item, MediaTypes
 from app.providers import tmdb
 from users.forms import NotificationSettingsForm, PasswordChangeForm, UserUpdateForm
@@ -273,12 +276,12 @@ def invalidate_ai_recommendations(user, previous_state, media_types):
     previous_fields, previous_prompts = previous_state
     current_fields, current_prompts = get_ai_prompt_state(user, media_types)
     if current_fields != previous_fields:
-        ai_recommendations.invalidate_user(user)
+        AIRecommendationsActions.invalidate_user(user.id)
         return
 
     for media_type in VALID_SEARCH_TYPES:
         if previous_prompts.get(media_type) != current_prompts.get(media_type):
-            ai_recommendations.invalidate_media_type(user, media_type)
+            AIRecommendationsActions.invalidate_media_type(user.id, media_type)
 
 
 def parse_ai_prompts(data):
@@ -317,6 +320,7 @@ def preferences(request):
     watch_provider_regions = tmdb.watch_provider_regions()
 
     if request.method == "GET":
+        ai_provider = get_provider_info()
         return render(
             request,
             "users/preferences.html",
@@ -327,7 +331,9 @@ def preferences(request):
                 "time_format_choices": TimeFormatChoices.choices,
                 "week_start_day_choices": WeekStartDayChoices.choices,
                 "watch_provider_choices": watch_provider_regions,
-                "gemini_configured": bool(settings.GEMINI_API_KEY),
+                "ai_configured": ai_provider.configured,
+                "ai_provider_label": ai_provider.label,
+                "ai_api_key_setting": ai_provider.api_key_setting,
                 "ai_prompt_max_length": AI_PROMPT_MAX_LENGTH,
                 "ai_prompts": [
                     {

@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 
 from celery.schedules import crontab
 from decouple import (
+    Choices,
     Config,
     Csv,
     RepositorySecret,
@@ -425,6 +426,13 @@ STEAM_API_KEY = config(
     ),  # Generate default key https://steamcommunity.com/dev/apikey
 )
 
+# LLM used for AI recommendations
+AI_PROVIDER = config(
+    "AI_PROVIDER",
+    default="gemini",
+    cast=Choices(["gemini", "claude"]),
+)
+
 GEMINI_API_KEY = config(
     "GEMINI_API_KEY",
     default=secret(
@@ -436,6 +444,24 @@ GEMINI_API_KEY = config(
 GEMINI_MODELS = config("GEMINI_MODEL", default="gemini-flash-latest", cast=Csv())
 # Seconds to wait for a model before falling back to the next one
 GEMINI_TIMEOUT = config("GEMINI_TIMEOUT", default=30, cast=int)
+
+ANTHROPIC_API_KEY = config(
+    "ANTHROPIC_API_KEY",
+    default=secret(
+        "ANTHROPIC_API_KEY_FILE",
+        "",
+    ),  # Generate key https://platform.claude.com/settings/keys
+)
+# Comma-separated, tried in order until one succeeds
+CLAUDE_MODELS = config("CLAUDE_MODEL", default="claude-haiku-5-5", cast=Csv())
+# Seconds to wait for a model before falling back to the next one
+CLAUDE_TIMEOUT = config("CLAUDE_TIMEOUT", default=30, cast=int)
+# When Claude thinks: never, only for background generations, or always
+CLAUDE_THINKING = config(
+    "CLAUDE_THINKING",
+    default="background",
+    cast=Choices(["off", "background", "always"]),
+)
 
 HARDCOVER_API = config(
     "HARDCOVER_API",
