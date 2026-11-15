@@ -95,6 +95,7 @@ class PromptTests(TestCase):
             prompt.startswith("The user is viewing this movie:\nTitle: Viewed")
         )
         self.assertIn(f"Recommend {MEDIA_COUNT + EXTRA_REQUESTED} movies", prompt)
+        self.assertIn("Never recommend a title the user disliked", prompt)
 
     def test_media_details_text(self):
         """Include genres, a capped synopsis and the user's score."""

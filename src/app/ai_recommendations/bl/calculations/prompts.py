@@ -41,13 +41,14 @@ MEDIA_PROMPT: Final = """\
 The user is viewing this {type_singular}:
 {media_details}
 
-Recommend {count} {type_plural} similar to this one that this user is likely to enjoy.
+Recommend {count} {type_plural} that are as close as possible to this one: the same themes, tone, genre and style.
 
 The user's ratings use a 0-10 scale.
 
 {taste}
 
-Similarity to the viewed title matters most; use the user's taste to choose among similar titles."""  # noqa: E501
+Similarity to the viewed title is what matters. Don't pick titles just because they match the user's liked titles; use those only to break ties between equally similar titles.
+Never recommend a title the user disliked, nor anything close to the titles they disliked."""  # noqa: E501
 
 LIKED_BLOCK: Final = "Titles the user liked (score >= {score:g}):\n{lines}"
 DISLIKED_BLOCK: Final = "Titles the user disliked (score <= {score:g}):\n{lines}"
