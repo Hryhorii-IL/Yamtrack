@@ -90,6 +90,24 @@ class ServicesTests(TestCase):
 
         self.assertEqual(result, {"data": "retry_success"})
 
+    @patch("app.providers.services.time.sleep")
+    @patch("app.providers.services.session.get")
+    def test_api_request_long_rate_limit_not_retried(self, mock_get, mock_sleep):
+        """Raise instead of sleeping when the rate limit resets much later."""
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.headers = {"Retry-After": "27943"}
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=mock_response,
+        )
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(requests.exceptions.HTTPError):
+            services.api_request("TEST", "GET", "https://example.com/api")
+
+        mock_get.assert_called_once()
+        mock_sleep.assert_not_called()
+
     @patch("app.providers.igdb.cache.delete")
     def test_handle_error_igdb_unauthorized(
         self,

@@ -24,6 +24,9 @@ from app.providers import (
 
 logger = logging.getLogger(__name__)
 
+# Longer waits (e.g. exhausted daily quotas) fail instead of blocking the request
+MAX_RATE_LIMIT_WAIT = 60
+
 
 def get_redis_client():
     """Return a Redis client."""
@@ -186,6 +189,12 @@ def api_request(
         # handle rate limiting
         if status_code == requests.codes.too_many_requests:
             seconds_to_wait = int(error_resp.headers.get("Retry-After", 5))
+            if seconds_to_wait > MAX_RATE_LIMIT_WAIT:
+                logger.warning(
+                    "Rate limited for %s seconds, not retrying",
+                    seconds_to_wait,
+                )
+                raise error from None
             logger.warning("Rate limited, waiting %s seconds", seconds_to_wait)
             time.sleep(seconds_to_wait + 3)
             logger.info("Retrying request")
