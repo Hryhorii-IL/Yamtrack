@@ -1,5 +1,5 @@
 {% if in_progress %}
-  {% include "app/components/ai_recommendations_loading.html" with url=request.path trigger="load delay:5s" %}
+  {% include "app/components/ai_recommendations_loading.html" with url=request.path trigger="load delay:2s" %}
 {% else %}
   <div class="ai-recommendations">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -18,17 +18,13 @@
     </div>
 
     {% if error %}
-      <div class="rounded-lg border border-red-700 bg-red-900/50 px-4 py-3 text-sm text-red-300">{{ error }}</div>
-    {% elif results %}
+      <div class="mb-4 rounded-lg border border-red-700 bg-red-900/50 px-4 py-3 text-sm text-red-300">{{ error }}</div>
+    {% endif %}
+    {% if results or growing %}
       <div class="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
-        {% for result in results %}
-          <div class="flex flex-col gap-2" title="{{ result.item.reason }}">
-            {% include "app/components/media_card.html" with item=result.item title=result.item.title media=result.media %}
-            <p class="text-xs text-gray-400 line-clamp-3">{{ result.item.reason }}</p>
-          </div>
-        {% endfor %}
+        {% include "app/components/ai_recommendations_more.html" %}
       </div>
-    {% else %}
+    {% elif not error %}
       <div class="rounded-lg border border-dashed border-gray-700 bg-[#2a2f35] px-6 py-12 text-center text-sm text-gray-400">
         No recommendations found. Try regenerating.
       </div>

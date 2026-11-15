@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from app import ai_recommendations as ai_recs
-from app import config, helpers, history_processor
+from app import config, helpers, history_processor, tasks
 from app import home as home_helpers
 from app import statistics as stats
 from app.forms import EpisodeForm, ManualItemForm, get_form_class
@@ -991,12 +991,15 @@ def ai_recommendations_section(request, media_type):
     if not _is_ai_fragment_request(request):
         return redirect(f"{reverse('ai_recommendations')}?type={media_type}")
 
+    if request.method == "GET" and "offset" in request.GET:
+        return _render_ai_pool_more(request, media_type)
+
     return _render_ai_recommendations(
         request,
         lambda force: ai_recs.global_recommendations(
-            request.user, media_type, force=force
+            request.user, media_type, tasks.queue_ai_generation, force=force
         ),
-        ai_recs.GLOBAL_COUNT,
+        pool_media_type=media_type,
     )
 
 
@@ -1030,7 +1033,6 @@ def media_ai_recommendations(request, source, media_type, media_id):
         lambda force: ai_recs.media_recommendations(
             request.user, media_type, source, media_id, force=force
         ),
-        ai_recs.MEDIA_COUNT,
     )
 
 
@@ -1046,8 +1048,12 @@ def _is_ai_fragment_request(request):
     )
 
 
-def _render_ai_recommendations(request, get_recommendations, limit):
-    """Render the AI recommendations section partial."""
+def _render_ai_recommendations(request, get_recommendations, *, pool_media_type=None):
+    """Render the AI recommendations section partial.
+
+    With ``pool_media_type`` the whole pool is shown and extended in the
+    background while it's below its target size.
+    """
     context = {}
     try:
         data = get_recommendations(force=request.method == "POST")
@@ -1057,13 +1063,81 @@ def _render_ai_recommendations(request, get_recommendations, limit):
         context["error"] = str(error)
     else:
         context["generated_at"] = data["generated_at"]
-        context["results"] = ai_recs.enrich(request, data["items"], limit)
+        if pool_media_type is None:
+            context["results"] = ai_recs.enrich(
+                request,
+                data["items"],
+                ai_recs.MEDIA_COUNT,
+            )
+        else:
+            tasks.queue_ai_extension_if_needed(request.user.id, pool_media_type, data)
+            context.update(
+                _ai_pool_context(request, data, pool_media_type, offset=0),
+            )
 
     return render(
         request,
         "app/components/ai_recommendations_section.html",
         context,
     )
+
+
+def _render_ai_pool_more(request, media_type):
+    """Render the pool items added after ``offset`` while the pool grows."""
+    data = cache.get(ai_recs.global_cache_key(request.user.id, media_type))
+    try:
+        offset = int(request.GET["offset"])
+        shown = int(request.GET.get("shown", 0))
+    except ValueError:
+        offset = None
+    # Stop polling when the pool was regenerated or invalidated meanwhile
+    if (
+        data is None
+        or offset is None
+        or request.GET.get("generated") != ai_recs.pool_version(data)
+    ):
+        return HttpResponse("")
+
+    context = _ai_pool_context(
+        request,
+        data,
+        media_type,
+        offset=offset,
+        shown=shown,
+    )
+    # The section shows errors at the top, appended chunks show them inline
+    context["inline_error"] = context["error"]
+    return render(request, "app/components/ai_recommendations_more.html", context)
+
+
+def _ai_pool_context(request, data, media_type, *, offset, shown=0):
+    """Return the context to render pool items from ``offset`` onwards.
+
+    ``shown`` cards are already on the page, so at most ``POOL_SHOWN`` are shown.
+    """
+    results = ai_recs.enrich(
+        request,
+        data["items"][offset:],
+        max(ai_recs.POOL_SHOWN - shown, 0),
+    )
+    shown += len(results)
+    return {
+        "results": results,
+        "error": data.get("error"),
+        "growing": shown < ai_recs.POOL_SHOWN
+        and (
+            data.get("partial")
+            or (
+                ai_recs.needs_extension(data)
+                and ai_recs.is_background_queued(request.user.id, media_type)
+            )
+        ),
+        # Poll faster while the first batch is shown card by card
+        "poll_delay": "1s" if data.get("partial") else "3s",
+        "offset": len(data["items"]),
+        "shown": shown,
+        "version": ai_recs.pool_version(data),
+    }
 
 
 @require_GET

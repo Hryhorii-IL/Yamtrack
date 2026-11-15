@@ -1,6 +1,5 @@
 import secrets
 
-from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -8,6 +7,7 @@ from django_celery_beat.models import PeriodicTask
 from django_celery_results.models import TaskResult
 
 from app.models import Item, MediaTypes, Status
+from app.providers import llm
 from users import helpers
 
 EXCLUDED_SEARCH_TYPES = [MediaTypes.SEASON.value, MediaTypes.EPISODE.value]
@@ -703,12 +703,12 @@ class User(AbstractUser):
     @property
     def ai_recommendations_available(self):
         """Return whether the AI recommendations page is usable."""
-        return self.ai_recommendations_enabled and bool(settings.GEMINI_API_KEY)
+        return self.ai_recommendations_enabled and llm.is_configured()
 
     @property
     def ai_media_recommendations_available(self):
         """Return whether the AI tab on media details pages is usable."""
-        return self.ai_media_recommendations_enabled and bool(settings.GEMINI_API_KEY)
+        return self.ai_media_recommendations_enabled and llm.is_configured()
 
     def get_ai_prompt(self, media_type, kind):
         """Return the user's AI prompt text of a kind for a media type."""

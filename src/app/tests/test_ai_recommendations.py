@@ -1,9 +1,12 @@
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 
 from app import ai_recommendations
 from app.models import (
@@ -27,6 +30,18 @@ def search_result(media_id, title, release_year=None):
         "image": settings.IMG_NONE,
         "release_year": release_year,
     }
+
+
+def search_by_title(responses):
+    """Return a search mock side effect answering by query, in any call order."""
+
+    def search(_media_type, query, _page, _source=None):
+        response = responses[query]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    return search
 
 
 class AIRecommendationsTestCase(TestCase):
@@ -71,7 +86,7 @@ class AIRecommendationsTestCase(TestCase):
 
 
 class TasteTests(AIRecommendationsTestCase):
-    """Test the taste profile sent to Gemini."""
+    """Test the taste profile sent to the LLM."""
 
     def test_rated_media_split_by_thresholds(self):
         """Split rated media into liked and disliked using the user thresholds."""
@@ -204,7 +219,7 @@ class WishesTests(AIRecommendationsTestCase):
 
 
 class ResolveTests(AIRecommendationsTestCase):
-    """Test matching Gemini titles to provider search results."""
+    """Test matching LLM titles to provider search results."""
 
     def test_best_match_prefers_title_and_year(self):
         """Pick the result with the same title and year."""
@@ -213,7 +228,7 @@ class ResolveTests(AIRecommendationsTestCase):
             search_result(2, "Dune", 1984),
             search_result(3, "Dune", 2021),
         ]
-        recommendation = {"title": "Dune", "year": 2021, "reason": ""}
+        recommendation = {"title": "Dune", "year": 2021}
 
         match = ai_recommendations.best_match(results, recommendation)
 
@@ -222,7 +237,7 @@ class ResolveTests(AIRecommendationsTestCase):
     def test_best_match_ignores_punctuation_and_accents(self):
         """Normalize titles before comparing them."""
         results = [search_result(1, "Other"), search_result(2, "Amélie")]
-        recommendation = {"title": "amelie!", "year": None, "reason": ""}
+        recommendation = {"title": "amelie!", "year": None}
 
         match = ai_recommendations.best_match(results, recommendation)
 
@@ -231,7 +246,7 @@ class ResolveTests(AIRecommendationsTestCase):
     def test_best_match_requires_exact_title(self):
         """Skip recommendations without a result of the same title."""
         results = [search_result(1, "First"), search_result(2, "Second")]
-        recommendation = {"title": "Unknown", "year": None, "reason": ""}
+        recommendation = {"title": "Unknown", "year": None}
 
         self.assertIsNone(ai_recommendations.best_match(results, recommendation))
         self.assertIsNone(ai_recommendations.best_match([], recommendation))
@@ -240,28 +255,53 @@ class ResolveTests(AIRecommendationsTestCase):
     def test_resolve_skips_errors_and_duplicates(self, mock_search):
         """Skip titles that fail to resolve or resolve to the same media."""
         error = services.ProviderAPIError(Sources.TMDB.value, Exception("boom"))
-        mock_search.side_effect = [
-            {"results": [search_result(1, "Dune", 2021)]},
-            error,
-            {"results": [search_result(1, "Dune", 2021)]},
-            {"results": []},
-        ]
+        mock_search.side_effect = search_by_title(
+            {
+                "Dune": {"results": [search_result(1, "Dune", 2021)]},
+                "Broken": error,
+                "Dune: Part One": {"results": [search_result(1, "Dune", 2021)]},
+                "Nothing": {"results": []},
+            },
+        )
         recommendations = [
-            {"title": "Dune", "year": 2021, "reason": "Epic"},
-            {"title": "Broken", "year": None, "reason": "x"},
-            {"title": "Dune: Part One", "year": 2021, "reason": "Again"},
-            {"title": "Nothing", "year": None, "reason": "x"},
+            {"title": "Dune", "year": 2021},
+            {"title": "Broken", "year": None},
+            {"title": "Dune: Part One", "year": 2021},
+            {"title": "Nothing", "year": None},
         ]
 
         items = ai_recommendations.resolve(recommendations, MediaTypes.MOVIE.value)
 
-        self.assertEqual(items, [{**search_result(1, "Dune", 2021), "reason": "Epic"}])
+        self.assertEqual(items, [search_result(1, "Dune", 2021)])
         mock_search.assert_any_call(
             MediaTypes.MOVIE.value,
             "Dune",
             1,
             Sources.TMDB.value,
         )
+
+    @patch("app.providers.services.search")
+    def test_resolve_searches_while_streaming(self, mock_search):
+        """Start searching before the stream ends and keep the stream's order."""
+        first_searched = threading.Event()
+
+        def search(_media_type, query, _page, _source=None):
+            if query == "First":
+                first_searched.set()
+                # Finish after the second search to check the result order
+                time.sleep(0.05)
+            return {"results": [search_result(query, query)]}
+
+        def stream():
+            yield {"title": "First", "year": None}
+            self.assertTrue(first_searched.wait(timeout=5))
+            yield {"title": "Second", "year": None}
+
+        mock_search.side_effect = search
+
+        items = ai_recommendations.resolve(stream(), MediaTypes.MOVIE.value)
+
+        self.assertEqual([item["title"] for item in items], ["First", "Second"])
 
 
 class CacheTests(AIRecommendationsTestCase):
@@ -331,6 +371,14 @@ class CacheTests(AIRecommendationsTestCase):
             60 + ai_recommendations.LOCK_EXTRA_TIMEOUT,
         )
 
+    @override_settings(AI_PROVIDER="claude", CLAUDE_MODELS=["a"], CLAUDE_TIMEOUT=20)
+    def test_lock_timeout_uses_selected_provider(self):
+        """Use the timeout settings of the selected provider."""
+        self.assertEqual(
+            ai_recommendations.lock_timeout(),
+            2 * 20 + ai_recommendations.LOCK_EXTRA_TIMEOUT,
+        )
+
     def test_invalidation_keeps_lock(self):
         """Keep the generation lock when the user's cache is invalidated."""
         key = ai_recommendations.global_cache_key(self.user.id, "movie")
@@ -377,25 +425,48 @@ class GenerationTests(AIRecommendationsTestCase):
         """Build the global prompt and resolve the response."""
         self.create_movie("1", "Great Movie", score=9)
         mock_recommend.return_value = [
-            {"title": "Dune", "year": 2021, "reason": "Epic"},
+            {"title": "Dune", "year": 2021},
         ]
         mock_search.return_value = {"results": [search_result(10, "Dune", 2021)]}
 
-        data = ai_recommendations.global_recommendations(
+        data = ai_recommendations.generate_global_recommendations(
             self.user,
             MediaTypes.MOVIE.value,
         )
 
         self.assertEqual(data["items"][0]["media_id"], 10)
+        self.assertFalse(data["partial"])
+        self.assertEqual(
+            cache.get(
+                ai_recommendations.global_cache_key(
+                    self.user.id,
+                    MediaTypes.MOVIE.value,
+                ),
+            ),
+            data,
+        )
         system_instruction, prompt = mock_recommend.call_args.args
         self.assertIn("as it appears on The Movie Database", system_instruction)
         count = ai_recommendations.GLOBAL_COUNT + ai_recommendations.EXTRA_REQUESTED
         self.assertTrue(prompt.startswith(f"Recommend {count} movies for this user."))
         self.assertIn("- Great Movie (movie) — 9/10", prompt)
 
-        # Second call is served from the cache
-        ai_recommendations.global_recommendations(self.user, MediaTypes.MOVIE.value)
-        mock_recommend.assert_called_once()
+    @override_settings(AI_PROVIDER="claude")
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    @patch("app.providers.claude.recommend")
+    def test_uses_selected_provider(self, mock_claude, mock_gemini, mock_search):
+        """Generate with Claude when it is the selected provider."""
+        mock_claude.return_value = [{"title": "Dune", "year": 2021}]
+        mock_search.return_value = {"results": [search_result(10, "Dune", 2021)]}
+
+        ai_recommendations.generate_global_recommendations(
+            self.user,
+            MediaTypes.MOVIE.value,
+        )
+
+        mock_claude.assert_called_once()
+        mock_gemini.assert_not_called()
 
     @patch("app.providers.services.search")
     @patch("app.providers.services.get_media_metadata")
@@ -409,13 +480,15 @@ class GenerationTests(AIRecommendationsTestCase):
             "synopsis": "A story.",
         }
         mock_recommend.return_value = [
-            {"title": "Viewed Movie", "year": None, "reason": "Same"},
-            {"title": "Other Movie", "year": None, "reason": "Similar"},
+            {"title": "Viewed Movie", "year": None},
+            {"title": "Other Movie", "year": None},
         ]
-        mock_search.side_effect = [
-            {"results": [search_result("1", "Viewed Movie")]},
-            {"results": [search_result("2", "Other Movie")]},
-        ]
+        mock_search.side_effect = search_by_title(
+            {
+                "Viewed Movie": {"results": [search_result("1", "Viewed Movie")]},
+                "Other Movie": {"results": [search_result("2", "Other Movie")]},
+            },
+        )
 
         data = ai_recommendations.media_recommendations(
             self.user,
@@ -452,3 +525,365 @@ class GenerationTests(AIRecommendationsTestCase):
         results = ai_recommendations.enrich(request, items, limit=1)
 
         self.assertEqual([result["item"]["media_id"] for result in results], ["2"])
+
+
+class PoolExtensionTests(AIRecommendationsTestCase):
+    """Test extending the global recommendation pool in the background."""
+
+    def setUp(self):
+        """Cache a small pool of movie recommendations."""
+        super().setUp()
+        self.key = ai_recommendations.global_cache_key(
+            self.user.id,
+            MediaTypes.MOVIE.value,
+        )
+        cache.set(
+            self.key,
+            {
+                "generated_at": timezone.now(),
+                "items": [search_result(1, "Dune", 2021)],
+            },
+        )
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_extend_adds_new_items(self, mock_recommend, mock_search):
+        """Append unseen titles, skip pool duplicates and exclude pool titles."""
+        mock_recommend.return_value = [
+            {"title": "Dune", "year": 2021},
+            {"title": "Arrival", "year": 2016},
+        ]
+        mock_search.side_effect = search_by_title(
+            {
+                "Dune": {"results": [search_result(1, "Dune", 2021)]},
+                "Arrival": {"results": [search_result(2, "Arrival", 2016)]},
+            },
+        )
+
+        extended = ai_recommendations.extend_global_recommendations(
+            self.user,
+            MediaTypes.MOVIE.value,
+        )
+
+        self.assertTrue(extended)
+        data = cache.get(self.key)
+        self.assertEqual(
+            [item["title"] for item in data["items"]],
+            ["Dune", "Arrival"],
+        )
+        self.assertEqual(data["extensions"], 1)
+        prompt = mock_recommend.call_args.args[1]
+        self.assertIn("Already recommended (do not repeat):\n- Dune", prompt)
+
+    @patch("app.providers.gemini.recommend")
+    def test_extend_skips_finished_pool(self, mock_recommend):
+        """Stop after the maximum number of extensions."""
+        data = cache.get(self.key)
+        cache.set(
+            self.key,
+            {**data, "extensions": ai_recommendations.MAX_EXTENSIONS},
+        )
+
+        self.assertFalse(
+            ai_recommendations.extend_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            ),
+        )
+        mock_recommend.assert_not_called()
+
+    @patch("app.providers.gemini.recommend")
+    def test_extend_skips_missing_pool(self, mock_recommend):
+        """Don't extend a pool that doesn't exist anymore."""
+        cache.delete(self.key)
+
+        self.assertFalse(
+            ai_recommendations.extend_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            ),
+        )
+        mock_recommend.assert_not_called()
+
+    @patch("app.providers.gemini.recommend")
+    def test_extend_skips_while_generating(self, mock_recommend):
+        """Don't extend while another generation holds the lock."""
+        cache.add(f"ai_lock_{self.key}", "other")
+
+        self.assertFalse(
+            ai_recommendations.extend_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            ),
+        )
+        mock_recommend.assert_not_called()
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_extend_discarded_after_invalidation(self, mock_recommend, mock_search):
+        """Don't restore a pool invalidated during generation."""
+
+        def invalidate(*_args):
+            ai_recommendations.invalidate_media_type(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+            return [{"title": "Arrival", "year": 2016}]
+
+        mock_recommend.side_effect = invalidate
+        mock_search.return_value = {"results": [search_result(2, "Arrival", 2016)]}
+
+        self.assertFalse(
+            ai_recommendations.extend_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            ),
+        )
+        self.assertIsNone(cache.get(self.key))
+
+
+class GlobalPoolTests(AIRecommendationsTestCase):
+    """Test serving and generating the global recommendation pool."""
+
+    def setUp(self):
+        """Prepare the pool cache key."""
+        super().setUp()
+        self.key = ai_recommendations.global_cache_key(
+            self.user.id,
+            MediaTypes.MOVIE.value,
+        )
+
+    def test_cached_pool_served(self):
+        """Return the cached pool without queueing a generation."""
+        cache.set(self.key, {"generated_at": timezone.now(), "items": []})
+        queue_generation = MagicMock()
+
+        data = ai_recommendations.global_recommendations(
+            self.user,
+            MediaTypes.MOVIE.value,
+            queue_generation,
+        )
+
+        self.assertEqual(data["items"], [])
+        queue_generation.assert_not_called()
+
+    def test_missing_pool_queues_generation(self):
+        """Queue a generation and report it in progress."""
+        queue_generation = MagicMock()
+
+        with self.assertRaises(ai_recommendations.RecommendationsInProgressError):
+            ai_recommendations.global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+                queue_generation,
+            )
+
+        queue_generation.assert_called_once_with(self.user.id, MediaTypes.MOVIE.value)
+
+    def test_force_drops_cached_pool(self):
+        """Drop the cached pool and queue a new generation."""
+        cache.set(self.key, {"generated_at": timezone.now(), "items": []})
+
+        with self.assertRaises(ai_recommendations.RecommendationsInProgressError):
+            ai_recommendations.global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+                MagicMock(),
+                force=True,
+            )
+
+        self.assertIsNone(cache.get(self.key))
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_pool_cached_item_by_item(self, mock_recommend, mock_search):
+        """Cache a partial pool while recommendations are still resolving."""
+        mock_recommend.return_value = [
+            {"title": "First", "year": None},
+            {"title": "Second", "year": None},
+        ]
+        cached_titles = []
+
+        def search(_media_type, query, _page, _source=None):
+            if query == "Second":
+                # Searches run concurrently, so wait for the first item
+                for _ in range(100):
+                    data = cache.get(self.key)
+                    if data["items"]:
+                        break
+                    time.sleep(0.01)
+                cached_titles.append(
+                    ([item["title"] for item in data["items"]], data["partial"]),
+                )
+            return {"results": [search_result(query, query)]}
+
+        mock_search.side_effect = search
+
+        data = ai_recommendations.generate_global_recommendations(
+            self.user,
+            MediaTypes.MOVIE.value,
+        )
+
+        self.assertEqual(cached_titles, [(["First"], True)])
+        self.assertEqual([item["title"] for item in data["items"]], ["First", "Second"])
+        self.assertFalse(cache.get(self.key)["partial"])
+
+    @patch("app.providers.gemini.recommend")
+    def test_generation_error_cached(self, mock_recommend):
+        """Cache the error briefly so the page shows it instead of polling."""
+        mock_recommend.side_effect = services.ProviderAPIError(
+            "gemini",
+            Exception("boom"),
+        )
+
+        with self.assertRaises(services.ProviderAPIError):
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+
+        data = cache.get(self.key)
+        self.assertIn("Gemini", data["error"])
+        self.assertFalse(data["partial"])
+        self.assertFalse(ai_recommendations.needs_extension(data))
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_generation_stops_after_invalidation(self, mock_recommend, mock_search):
+        """Don't restore a pool invalidated during generation."""
+        mock_recommend.return_value = [{"title": "First", "year": None}]
+
+        def search(*_args):
+            ai_recommendations.invalidate_media_type(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+            return {"results": [search_result("First", "First")]}
+
+        mock_search.side_effect = search
+
+        self.assertIsNone(
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            ),
+        )
+        self.assertIsNone(cache.get(self.key))
+
+    def test_generation_in_progress(self):
+        """Raise when another generation holds the lock."""
+        cache.add(f"ai_lock_{self.key}", "other")
+
+        with self.assertRaises(ai_recommendations.RecommendationsInProgressError):
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+
+    def test_partial_pool_not_extended(self):
+        """Don't extend a pool that's still being generated."""
+        self.assertFalse(
+            ai_recommendations.needs_extension({"items": [], "partial": True}),
+        )
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_partial_pool_expires_with_lock(self, mock_recommend, mock_search):
+        """Cache partial pools only as long as the lock, final pools for a day."""
+        mock_recommend.return_value = [{"title": "First", "year": None}]
+        mock_search.return_value = {"results": [search_result("First", "First")]}
+
+        with patch.object(
+            ai_recommendations.cache,
+            "set",
+            wraps=ai_recommendations.cache.set,
+        ) as mock_set:
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+
+        timeouts = [call.args[2] for call in mock_set.call_args_list]
+        self.assertEqual(timeouts[-1], ai_recommendations.CACHE_TIMEOUT)
+        self.assertTrue(
+            all(
+                timeout == ai_recommendations.lock_timeout()
+                for timeout in timeouts[:-1]
+            ),
+        )
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_unresolved_pool_cached_as_error(self, mock_recommend, mock_search):
+        """Show an error instead of caching an empty pool for a day."""
+        mock_recommend.return_value = [{"title": "Unknown", "year": None}]
+        mock_search.return_value = {"results": []}
+
+        with self.assertRaises(ai_recommendations.NoRecommendationsError):
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+            )
+
+        data = cache.get(self.key)
+        self.assertIn("None of the recommended titles", data["error"])
+        self.assertFalse(ai_recommendations.needs_extension(data))
+
+    @patch("app.providers.gemini.recommend")
+    def test_non_progressive_failure_keeps_pool(self, mock_recommend):
+        """Keep the current pool when a background refresh fails."""
+        pool = {"generated_at": timezone.now(), "items": [search_result(1, "Dune")]}
+        cache.set(self.key, pool)
+        mock_recommend.side_effect = services.ProviderAPIError(
+            "gemini",
+            Exception("boom"),
+        )
+
+        with self.assertRaises(services.ProviderAPIError):
+            ai_recommendations.generate_global_recommendations(
+                self.user,
+                MediaTypes.MOVIE.value,
+                progressive=False,
+            )
+
+        self.assertEqual(cache.get(self.key), pool)
+
+    @patch("app.providers.services.search")
+    @patch("app.providers.gemini.recommend")
+    def test_non_progressive_replaces_pool(self, mock_recommend, mock_search):
+        """Swap in the refreshed pool only once it's complete."""
+        cache.set(
+            self.key,
+            {"generated_at": timezone.now(), "items": [search_result(1, "Dune")]},
+        )
+        mock_recommend.return_value = [{"title": "Arrival", "year": None}]
+        mock_search.return_value = {"results": [search_result(2, "Arrival")]}
+
+        data = ai_recommendations.generate_global_recommendations(
+            self.user,
+            MediaTypes.MOVIE.value,
+            progressive=False,
+        )
+
+        self.assertEqual(cache.get(self.key), data)
+        self.assertEqual([item["title"] for item in data["items"]], ["Arrival"])
+
+    @patch("app.providers.services.search")
+    def test_iter_resolved_stops_without_draining_stream(self, mock_search):
+        """Return right away when the caller stops before the stream ends."""
+        release = threading.Event()
+        self.addCleanup(release.set)
+        mock_search.return_value = {"results": [search_result("First", "First")]}
+
+        def stream():
+            yield {"title": "First", "year": None}
+            # Stands in for an LLM that is still generating
+            release.wait(timeout=5)
+            yield {"title": "Second", "year": None}
+
+        resolved = ai_recommendations.iter_resolved(stream(), MediaTypes.MOVIE.value)
+        start = time.perf_counter()
+        next(resolved)
+        resolved.close()
+
+        self.assertLess(time.perf_counter() - start, 1)

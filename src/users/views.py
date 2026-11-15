@@ -15,7 +15,7 @@ from django_celery_beat.models import PeriodicTask
 
 from app import ai_recommendations
 from app.models import Item, MediaTypes
-from app.providers import tmdb
+from app.providers import llm, tmdb
 from users.forms import NotificationSettingsForm, PasswordChangeForm, UserUpdateForm
 from users.models import (
     AI_PROMPT_KINDS,
@@ -327,7 +327,9 @@ def preferences(request):
                 "time_format_choices": TimeFormatChoices.choices,
                 "week_start_day_choices": WeekStartDayChoices.choices,
                 "watch_provider_choices": watch_provider_regions,
-                "gemini_configured": bool(settings.GEMINI_API_KEY),
+                "ai_configured": llm.is_configured(),
+                "ai_provider_label": llm.provider_label(),
+                "ai_api_key_setting": llm.api_key_setting(),
                 "ai_prompt_max_length": AI_PROMPT_MAX_LENGTH,
                 "ai_prompts": [
                     {
