@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from app.ai_recommendations.bl.ai_recommendations_actions import (
     AIRecommendationsActions,
@@ -328,3 +328,54 @@ class QueueAndInvalidationActionsTests(ActionsTestCase):
 
         AIRecommendationsActions.invalidate_user(USER_ID, pool_store=self.pool_store)
         self.assertIsNone(self.pool_store.load_pool(USER_ID, "anime"))
+
+
+@override_settings(CLAUDE_THINKING="background")
+class ThinkingActionsTests(ActionsTestCase):
+    """Test which generations think in the default background mode."""
+
+    def setUp(self):
+        """Stub the provider metadata used by the media use case."""
+        super().setUp()
+        self.enterContext(
+            patch(
+                "app.providers.services.get_media_metadata",
+                return_value={"title": "Tracked"},
+            ),
+        )
+
+    def test_background_generations_think(self):
+        """Think for refreshes and extensions, not for watched generations."""
+        clock = FixedClock(NOW)
+        AIRecommendationsActions.generate_pool(
+            USER_ID, "movie", clock=clock, **self.collaborators()
+        )
+        AIRecommendationsActions.generate_pool(
+            USER_ID,
+            "movie",
+            progressive=False,
+            refresh=True,
+            clock=clock,
+            **self.collaborators(),
+        )
+        AIRecommendationsActions.extend_pool(USER_ID, "movie", **self.collaborators())
+        AIRecommendationsActions.media_recommendations(
+            USER_ID,
+            "movie",
+            "tmdb",
+            "100",
+            force=False,
+            clock=clock,
+            **self.collaborators(),
+        )
+
+        self.assertEqual(self.llm_client.thinking, [False, True, True, False])
+
+    @override_settings(CLAUDE_THINKING="always")
+    def test_always(self):
+        """Think for watched generations too."""
+        AIRecommendationsActions.generate_pool(
+            USER_ID, "movie", clock=FixedClock(NOW), **self.collaborators()
+        )
+
+        self.assertEqual(self.llm_client.thinking, [True])

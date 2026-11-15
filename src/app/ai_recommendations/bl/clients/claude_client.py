@@ -59,16 +59,21 @@ class ClaudeClient(LLMClient):
         model: str,
         system_instruction: str,
         prompt: str,
+        thinking: bool,  # noqa: FBT001 - forwarded positionally by the fallback
     ) -> Iterator[RecommendedTitle]:
         """Yield recommendations as a single Claude model streams them.
 
-        Thinking is disabled since it delays the first recommendation by several
-        seconds; a short or empty list is retried once with thinking, and the
-        repeated titles are dropped when resolving.
+        Without ``thinking`` the first recommendation comes seconds sooner; a
+        short or empty list is then retried once with thinking, and the repeated
+        titles are dropped when resolving.
         """
+        if thinking:
+            yield from self._stream(model, system_instruction, prompt, thinking=True)
+            return
+
         count = 0
-        for thinking in (False, True):
-            if thinking:
+        for thinking_retry in (False, True):
+            if thinking_retry:
                 if count >= MIN_FAST_ITEMS:
                     return
                 logger.warning(
@@ -81,7 +86,7 @@ class ClaudeClient(LLMClient):
                 model,
                 system_instruction,
                 prompt,
-                thinking=thinking,
+                thinking=thinking_retry,
             ):
                 count += 1
                 yield recommendation

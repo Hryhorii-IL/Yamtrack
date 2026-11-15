@@ -59,6 +59,7 @@ class PoolGenerationService:
         progressive: bool,
         refresh: bool,
         last_attempt: bool,
+        thinking: bool,
         llm_client: RecommendationSource,
         search_client: TitleResolver,
         pool_store: PoolStore,
@@ -72,6 +73,7 @@ class PoolGenerationService:
         self.progressive = progressive
         self.refresh = refresh
         self.last_attempt = last_attempt
+        self.thinking = thinking
         self.llm_client = llm_client
         self.search_client = search_client
         self.pool_store = pool_store
@@ -165,6 +167,7 @@ class PoolGenerationService:
         recommendations = self.llm_client.recommend(
             self.system_instruction,
             self.prompt,
+            thinking=self.thinking,
         )
         for item in self.search_client.resolve(recommendations, self.media_type):
             if self.progressive and not self._is_current(self.pool):

@@ -55,6 +55,7 @@ class MediaRecommendationsService:
         source: str,
         media_id: str,
         *,
+        thinking: bool,
         llm_client: RecommendationSource,
         search_client: TitleResolver,
         pool_store: PoolStore,
@@ -66,6 +67,7 @@ class MediaRecommendationsService:
         self.status = MediaRecommendationsStatus.LOADED
         self.user_id = user_id
         self.media_type = media_type
+        self.thinking = thinking
         self.llm_client = llm_client
         self.search_client = search_client
         self.pool_store = pool_store
@@ -118,6 +120,7 @@ class MediaRecommendationsService:
         recommendations = self.llm_client.recommend(
             self.system_instruction,
             self.prompt,
+            thinking=self.thinking,
         )
         try:
             items = without_media(

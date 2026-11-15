@@ -456,6 +456,12 @@ ANTHROPIC_API_KEY = config(
 CLAUDE_MODELS = config("CLAUDE_MODEL", default="claude-haiku-5-5", cast=Csv())
 # Seconds to wait for a model before falling back to the next one
 CLAUDE_TIMEOUT = config("CLAUDE_TIMEOUT", default=30, cast=int)
+# When Claude thinks: never, only for background generations, or always
+CLAUDE_THINKING = config(
+    "CLAUDE_THINKING",
+    default="background",
+    cast=Choices(["off", "background", "always"]),
+)
 
 HARDCOVER_API = config(
     "HARDCOVER_API",

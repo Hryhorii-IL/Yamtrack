@@ -20,14 +20,18 @@ class FakeLLMClient:
         self.titles = list(titles)
         self.error = error
         self.calls: list[tuple[str, str]] = []
+        self.thinking: list[bool] = []
 
     def recommend(
         self,
         system_instruction: str,
         prompt: str,
+        *,
+        thinking: bool = False,
     ) -> Iterator[RecommendedTitle]:
         """Yield the scripted titles, then raise the scripted error."""
         self.calls.append((system_instruction, prompt))
+        self.thinking.append(thinking)
         for title in self.titles:
             yield RecommendedTitle(title=title)
         if self.error is not None:

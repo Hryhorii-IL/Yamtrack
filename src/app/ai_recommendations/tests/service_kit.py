@@ -26,6 +26,7 @@ def generation_service(user_id, pool_store, **kwargs):
         progressive=kwargs.pop("progressive", True),
         refresh=kwargs.pop("refresh", False),
         last_attempt=kwargs.pop("last_attempt", True),
+        thinking=kwargs.pop("thinking", False),
         llm_client=kwargs.pop("llm_client", FakeLLMClient()),
         search_client=kwargs.pop("search_client", FakeSearchClient()),
         pool_store=pool_store,
@@ -39,6 +40,7 @@ def extension_service(user_id, pool_store, **kwargs):
     return PoolExtensionService(
         user_id,
         "movie",
+        thinking=kwargs.pop("thinking", False),
         llm_client=kwargs.pop("llm_client", FakeLLMClient()),
         search_client=kwargs.pop("search_client", FakeSearchClient()),
         pool_store=pool_store,
@@ -53,6 +55,7 @@ def media_service(user_id, pool_store, **kwargs):
         "movie",
         "tmdb",
         "1",
+        thinking=kwargs.pop("thinking", False),
         llm_client=kwargs.pop("llm_client", FakeLLMClient()),
         search_client=kwargs.pop("search_client", FakeSearchClient()),
         pool_store=pool_store,

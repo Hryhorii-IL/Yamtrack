@@ -61,12 +61,15 @@ class LLMClient(ABC):
         self,
         system_instruction: str,
         prompt: str,
+        *,
+        thinking: bool = False,
     ) -> Iterator[RecommendedTitle]:
         """Yield recommendations, falling back to the next model on failures.
 
         Falls back only while nothing has been yielded, since the caller may
         already be using the first model's recommendations.
         """
+        request = (system_instruction, prompt, thinking)
         if not self.models:
             msg = f"No {self.label} models configured"
             raise self.invalid(msg)
@@ -74,7 +77,7 @@ class LLMClient(ABC):
         *fallback_models, last_model = self._models_in_order()
         for model in fallback_models:
             try:
-                yield from self._generate_or_skip(model, system_instruction, prompt)
+                yield from self._generate_or_skip(model, *request)
             except LLMClientAuthError:
                 # The API key is shared by all models, so retrying won't help
                 raise
@@ -83,7 +86,7 @@ class LLMClient(ABC):
             else:
                 return
 
-        yield from self._generate_or_skip(last_model, system_instruction, prompt)
+        yield from self._generate_or_skip(last_model, *request)
 
     @abstractmethod
     def generate(
@@ -91,6 +94,7 @@ class LLMClient(ABC):
         model: str,
         system_instruction: str,
         prompt: str,
+        thinking: bool,  # noqa: FBT001 - forwarded positionally by the fallback
     ) -> Iterator[RecommendedTitle]:
         """Yield a single model's recommendations as they stream in."""
 
@@ -123,6 +127,7 @@ class LLMClient(ABC):
         model: str,
         system_instruction: str,
         prompt: str,
+        thinking: bool,  # noqa: FBT001 - part of the forwarded request
     ) -> Iterator[RecommendedTitle]:
         """Yield a model's recommendations and skip the model for a while on failure.
 
@@ -131,7 +136,12 @@ class LLMClient(ABC):
         """
         yielded = False
         try:
-            for recommendation in self.generate(model, system_instruction, prompt):
+            for recommendation in self.generate(
+                model,
+                system_instruction,
+                prompt,
+                thinking,
+            ):
                 yielded = True
                 yield recommendation
             if not yielded:

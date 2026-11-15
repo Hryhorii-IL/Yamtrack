@@ -84,9 +84,13 @@ class PoolExtensionServiceCommitTests(TestCase):
         user_id = self.user.id
 
         class InvalidatingLLMClient(FakeLLMClient):
-            def recommend(self, system_instruction, prompt):
+            def recommend(self, system_instruction, prompt, *, thinking=False):
                 store.invalidate_media_type(user_id, "movie")
-                yield from super().recommend(system_instruction, prompt)
+                yield from super().recommend(
+                    system_instruction,
+                    prompt,
+                    thinking=thinking,
+                )
 
         self.assertFalse(self.planned(InvalidatingLLMClient(["Arrival"])).commit())
         self.assertIsNone(self.store.load_pool(self.user.id, "movie"))

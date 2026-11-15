@@ -18,8 +18,13 @@ class RecommendationSource(Protocol):
         self,
         system_instruction: str,
         prompt: str,
+        *,
+        thinking: bool = False,
     ) -> Iterator[RecommendedTitle]:
-        """Yield recommended titles as they are generated."""
+        """Yield recommended titles as they are generated.
+
+        ``thinking`` trades speed for better picks where the provider supports it.
+        """
         ...
 
 

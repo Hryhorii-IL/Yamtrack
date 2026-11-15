@@ -48,6 +48,7 @@ class GeminiClient(LLMClient):
         model: str,
         system_instruction: str,
         prompt: str,
+        thinking: bool,  # noqa: ARG002, FBT001 - Gemini models pick their own thinking
     ) -> Iterator[RecommendedTitle]:
         """Yield recommendations as a single Gemini model streams them."""
         parser = ItemStreamParser()

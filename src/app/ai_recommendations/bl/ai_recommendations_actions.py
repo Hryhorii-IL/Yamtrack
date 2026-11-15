@@ -4,9 +4,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.ai_recommendations.bl.calculations.pool import needs_extension
+from app.ai_recommendations.bl.calculations.thinking import uses_thinking
 from app.ai_recommendations.bl.clients import (
     make_llm_client,
     make_media_search_client,
+    thinking_mode,
 )
 from app.ai_recommendations.bl.errors import (
     LibraryStoreError,
@@ -116,6 +118,8 @@ class AIRecommendationsActions:
                     progressive=progressive,
                     refresh=refresh,
                     last_attempt=last_attempt,
+                    # Progressive pools are watched card by card, refreshes aren't
+                    thinking=uses_thinking(thinking_mode(), background=not progressive),
                     llm_client=llm_client or make_llm_client(),
                     search_client=search_client or make_media_search_client(),
                     pool_store=store,
@@ -159,6 +163,7 @@ class AIRecommendationsActions:
                 service = PoolExtensionService(
                     user_id,
                     media_type,
+                    thinking=uses_thinking(thinking_mode(), background=True),
                     llm_client=llm_client or make_llm_client(),
                     search_client=search_client or make_media_search_client(),
                     pool_store=store,
@@ -213,6 +218,7 @@ class AIRecommendationsActions:
                     media_type,
                     source,
                     media_id,
+                    thinking=uses_thinking(thinking_mode(), background=False),
                     llm_client=llm_client or make_llm_client(),
                     search_client=search_client or make_media_search_client(),
                     pool_store=store,

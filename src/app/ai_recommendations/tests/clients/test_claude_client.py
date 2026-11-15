@@ -86,6 +86,17 @@ class ClaudeClientTests(TestCase):
         self.assertEqual(retry["thinking"], {"type": "adaptive"})
         self.assertEqual(retry["model"], "first")
 
+    def test_thinking_requested(self):
+        """Think from the first request when asked, without a fast attempt."""
+        claude = client(stream(titles(1)))
+
+        self.assertEqual(
+            list(claude.recommend("system", "prompt", thinking=True)),
+            titles(1),
+        )
+        [kwargs] = requests(claude)
+        self.assertEqual(kwargs["thinking"], {"type": "adaptive"})
+
     def test_empty_responses_fall_back(self):
         """Try the next model when both requests return nothing."""
         claude = client(stream([]), stream([]), stream(titles(MIN_FAST_ITEMS)))

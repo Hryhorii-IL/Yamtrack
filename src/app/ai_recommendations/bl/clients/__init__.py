@@ -7,6 +7,7 @@ from django.conf import settings
 from app.ai_recommendations.bl.clients.claude_client import ClaudeClient
 from app.ai_recommendations.bl.clients.gemini_client import GeminiClient
 from app.ai_recommendations.bl.clients.media_search_client import MediaSearchClient
+from app.ai_recommendations.bl.types.thinking import ThinkingMode
 
 if TYPE_CHECKING:
     from app.ai_recommendations.bl.clients.llm_client import LLMClient
@@ -35,6 +36,11 @@ def make_media_search_client() -> MediaSearchClient:
 def llm_client_class() -> type[LLMClient]:
     """Return the client class of the selected AI provider."""
     return LLM_CLIENTS[settings.AI_PROVIDER]
+
+
+def thinking_mode() -> ThinkingMode:
+    """Return when the selected provider may think, from CLAUDE_THINKING."""
+    return ThinkingMode(settings.CLAUDE_THINKING)
 
 
 def llm_max_duration() -> int:

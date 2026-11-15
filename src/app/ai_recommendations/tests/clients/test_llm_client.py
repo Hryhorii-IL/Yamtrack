@@ -21,7 +21,7 @@ class ScriptedClient(LLMClient):
         self.script = script
         self.called = []
 
-    def generate(self, model, system_instruction, prompt):  # noqa: ARG002
+    def generate(self, model, system_instruction, prompt, thinking):  # noqa: ARG002
         """Yield the model's scripted titles, then raise its scripted error."""
         self.called.append(model)
         titles, status_code = self.script.get(model, ([DUNE], None))

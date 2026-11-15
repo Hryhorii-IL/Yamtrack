@@ -44,6 +44,7 @@ class PoolExtensionService:
         user_id: int,
         media_type: str,
         *,
+        thinking: bool,
         llm_client: RecommendationSource,
         search_client: TitleResolver,
         pool_store: PoolStore,
@@ -53,6 +54,7 @@ class PoolExtensionService:
         self.status = PoolExtensionStatus.LOADED
         self.user_id = user_id
         self.media_type = media_type
+        self.thinking = thinking
         self.llm_client = llm_client
         self.search_client = search_client
         self.pool_store = pool_store
@@ -99,6 +101,7 @@ class PoolExtensionService:
         recommendations = self.llm_client.recommend(
             self.system_instruction,
             self.prompt,
+            thinking=self.thinking,
         )
         try:
             items = list(self.search_client.resolve(recommendations, self.media_type))

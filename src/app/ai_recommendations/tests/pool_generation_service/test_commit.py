@@ -138,9 +138,13 @@ class PoolGenerationServiceCommitTests(TestCase):
         user_id = self.user.id
 
         class InvalidatingLLMClient(FakeLLMClient):
-            def recommend(self, system_instruction, prompt):
+            def recommend(self, system_instruction, prompt, *, thinking=False):
                 store.invalidate_user(user_id)
-                yield from super().recommend(system_instruction, prompt)
+                yield from super().recommend(
+                    system_instruction,
+                    prompt,
+                    thinking=thinking,
+                )
 
         service = generation_service(
             user_id,
@@ -186,6 +190,22 @@ class PoolGenerationServiceCommitTests(TestCase):
 
         self.assertEqual(pool.items, (SECOND,))
         self.assertEqual(self.saved(), pool)
+
+    def test_thinking_passed_to_llm(self):
+        """Ask the LLM to think when the service was told to."""
+        llm_client = FakeLLMClient(["First"])
+        service = generation_service(
+            self.user.id,
+            self.store,
+            thinking=True,
+            llm_client=llm_client,
+            search_client=FakeSearchClient(CATALOG),
+        )
+        service.plan()
+
+        service.commit()
+
+        self.assertEqual(llm_client.thinking, [True])
 
     def test_commit_before_plan(self):
         """Refuse to commit an unplanned service."""
