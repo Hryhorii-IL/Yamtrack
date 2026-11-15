@@ -21,3 +21,6 @@ TODO.txt
 
 # Local Postgres data from deploy/
 /db/
+
+*.mo
+src/locale/*.pot
