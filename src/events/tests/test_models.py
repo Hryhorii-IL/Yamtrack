@@ -1,4 +1,5 @@
 import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
@@ -90,6 +91,14 @@ class EventModelTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
+        # The in-progress manga looks up its length on save; don't depend on a
+        # live MangaUpdates API
+        self.enterContext(
+            patch(
+                "app.providers.mangaupdates.manga",
+                return_value={"max_progress": None},
+            ),
+        )
         self.credentials = {"username": "testuser", "password": "testpassword"}
         self.user = get_user_model().objects.create_user(**self.credentials)
 
@@ -198,6 +207,14 @@ class EventManagerTests(TestCase):
 
     def setUp(self):
         """Set up test data."""
+        # The in-progress manga looks up its length on save; don't depend on a
+        # live MangaUpdates API
+        self.enterContext(
+            patch(
+                "app.providers.mangaupdates.manga",
+                return_value={"max_progress": None},
+            ),
+        )
         self.credentials = {"username": "testuser", "password": "testpassword"}
         self.user = get_user_model().objects.create_user(**self.credentials)
 
